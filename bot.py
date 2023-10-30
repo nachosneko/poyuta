@@ -113,4 +113,4 @@ async def check_and_react(user_response, message):
         await message.add_reaction("❌")  # React with an incorrect emote
 
 # Run your bot with your bot token
-bot.run('TOKEN')
+bot.run('MTE2ODEyMzMyMjQ3OTk0Nzg5OA.G52pfV.M1SmMaCPmCT6hCgKRPcylAvoeAQYgskT9AZ-5k')
