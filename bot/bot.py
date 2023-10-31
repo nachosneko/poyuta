@@ -96,28 +96,24 @@ async def addrole(ctx, emote, role: discord.Role):
 
 
 # Define a list of correct answers
-correct_answers = ["saori hayami", "yuuichi nakamura"]
-
+correct_answers = ['correct answer 1', 'correct answer 2']
 
 @bot.event
 async def on_message(message):
-    if message.channel.id == 1168221032516161626 and message.content.startswith(
-        "female "
-    ):
+    if message.channel.id == 1168221032516161626 and '||' in message.content:
         # Process the user's input
         await process_user_input(message)
     await bot.process_commands(message)
 
 
 async def process_user_input(message):
-    user_response = message.content[len("female ") :]  # Remove the catchphrase prefix
+    user_response = message.content[len('||'):]  # Remove the catchphrase prefix
     await check_and_react(user_response, message)
-
 
 async def check_and_react(user_response, message):
     user_response = user_response.lower()
     user_response = user_response.replace("||", "").strip()
-
+    
     if any(answer in user_response for answer in correct_answers):
         await message.add_reaction("✅")  # React with a correct emote
     else:
