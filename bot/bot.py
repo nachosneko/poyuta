@@ -100,7 +100,7 @@ correct_answers = ['correct answer 1', 'correct answer 2']
 
 @bot.event
 async def on_message(message):
-    if message.channel.id == 1168221032516161626 and '||' in message.content:
+    if message.channel.id == config["CHANNEL_OR_THREAD_ID"] and '||' in message.content:
         # Process the user's input
         await process_user_input(message)
     await bot.process_commands(message)
