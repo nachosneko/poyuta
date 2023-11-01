@@ -4,36 +4,12 @@ Utility functions for the bot.
 
 # Standard library imports
 import os
+import re
 
 # Third party imports
 from dotenv import dotenv_values
 
-
-def load_environment() -> dict:
-    """Load environment variables from .env files and the environment.
-    Load in that order :
-    - .env.shared
-    - .env.secret
-    - environment variables
-
-    The latest loaded variables override the previous ones.
-
-    Returns
-    -------
-        dict: The environment variables.
-    """
-
-    config = {
-        **dotenv_values(".env.shared"),  # load shared development variables
-        **dotenv_values(".env.secret"),  # load sensitive variables
-        **os.environ,  # override loaded values with environment variables
-    }
-
-    return config
-
-import re
-
-
+# Define a list of replacement rules
 ANIME_REGEX_REPLACE_RULES = [
     # Ļ can't lower correctly with sql lower function
     {"input": "ļ", "replace": "[ļĻ]"},
@@ -72,6 +48,29 @@ ANIME_REGEX_REPLACE_RULES = [
     {"input": "r", "replace": "[rЯ]"},
     {"input": "s", "replace": "[sς]"},
 ]
+
+
+def load_environment() -> dict:
+    """Load environment variables from .env files and the environment.
+    Load in that order :
+    - .env.shared
+    - .env.secret
+    - environment variables
+
+    The latest loaded variables override the previous ones.
+
+    Returns
+    -------
+        dict: The environment variables.
+    """
+
+    config = {
+        **dotenv_values(".env.shared"),  # load shared development variables
+        **dotenv_values(".env.secret"),  # load sensitive variables
+        **os.environ,  # override loaded values with environment variables
+    }
+
+    return config
 
 
 def escape_and_replace(input_str: str) -> str:
@@ -220,5 +219,3 @@ def extract_answer_from_user_input(user_input: str) -> str:
 
     # Otherwise, return the "answer" part
     return match.group(2)
-
-

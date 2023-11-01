@@ -1,3 +1,4 @@
 discord.py
 python-dotenv
-aiohttp==3.9.0b0
+sqlalchemy
+aiohttp==3.9.0b0 # for python > 3.12
