@@ -1,16 +1,12 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-from discord.ext.commands import Bot
-from discord.ext import tasks
-
 
 # Database
-from database import User
-from database import SessionFactory
+from poyuta.database import User, SessionFactory
 
 # Utils
-from utils import load_environment
+from poyuta.utils import load_environment
 
 config = load_environment()
 
@@ -140,7 +136,3 @@ async def male(interaction: discord.Interaction, seiyuu_male: str):
         )
     else:
         await interaction.response.send_message(f"**incorrect** :skull:")
-
-
-# Run the bot with your token
-bot.run(config["BOT_SECRET_TOKEN"])
