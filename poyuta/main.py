@@ -1,16 +1,21 @@
+# Standard libraries
+import re
+
+
+# Discord
 import discord
 from discord import app_commands
 from discord.ext import commands
-from discord.ext.commands import Bot
-from discord.ext import tasks
-
 
 # Database
-from database import User
-from database import SessionFactory
+from poyuta.database import User, SessionFactory
 
 # Utils
-from utils import load_environment
+from poyuta.utils import (
+    load_environment,
+    extract_answer_from_user_input,
+    process_user_input,
+)
 
 config = load_environment()
 
@@ -123,7 +128,8 @@ async def newmale(ctx, new_male_clip, new_correct_male):
 @bot.tree.command(name="female")
 @app_commands.describe(seiyuu_female="guess the female seiyuu")
 async def female(interaction: discord.Interaction, seiyuu_female: str):
-    if seiyuu_female.lower() == correct_female.lower():
+    user_answer_pattern = process_user_input(seiyuu_female)
+    if re.search(user_answer_pattern, correct_female):
         await interaction.response.send_message(
             f"you guessed it **correctly** :muscle:"
         )
@@ -134,13 +140,10 @@ async def female(interaction: discord.Interaction, seiyuu_female: str):
 @bot.tree.command(name="male")
 @app_commands.describe(seiyuu_male="guess the male seiyuu")
 async def male(interaction: discord.Interaction, seiyuu_male: str):
-    if seiyuu_male.lower() == correct_male.lower():
+    user_answer_pattern = process_user_input(seiyuu_male)
+    if re.search(user_answer_pattern, correct_male):
         await interaction.response.send_message(
             f":fearful: you guessed it **correctly**"
         )
     else:
         await interaction.response.send_message(f"**incorrect** :skull:")
-
-
-# Run the bot with your token
-bot.run(config["BOT_SECRET_TOKEN"])
