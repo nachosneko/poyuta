@@ -46,6 +46,5 @@ And fill the .env.secret file with your own configuration.
 Run the bot :
 
 ```bash
-cd bot
-python bot.py
+python runner.py
 ```
