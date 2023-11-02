@@ -87,34 +87,29 @@ async def currentclips(ctx):
 
 
 # 'newfemale' command
-@bot.command()
-async def newfemale(ctx, new_female_clip, new_correct_female):
+@bot.tree.command(name="newquiz")
+@app_commands.describe(new_female_clip="input new clips and seiyuu")
+async def newquiz(interaction: discord.Interaction, new_female_clip: str, new_correct_female: str, new_male_clip: str, new_correct_male: str):
     user = None
 
     # Get the user, including the 'answers' relationship
     with bot.session as session:
-        user = session.query(User).filter(User.discord_id == ctx.author.id).first()
+        user = session.query(User).filter(User.discord_id == interaction.user.id).first()
 
     if not user:
         with bot.session as session:
-            print("adding user to database:", ctx.author.id, ctx.author.name)
-            user = User(discord_id=ctx.author.id, name=ctx.author.name)
+            print("adding user to database:", interaction.user.id, interaction.user.name)
+            user = User(discord_id=interaction.user.id, name=interaction.user.name)
             session.add(user)
             session.commit()
 
-    if ctx.author.id not in admin_user_ids:
-        await ctx.send("only admins can change the clip")
+    if interaction.user.id not in admin_user_ids:
+        await interaction.response.send_message(f"only admins can change the clips")
     else:
         await change_female(new_female_clip, new_correct_female)
-        await ctx.send(f"female clip updated")
-
-@bot.command()
-async def newmale(ctx, new_male_clip, new_correct_male):
-    if ctx.author.id not in admin_user_ids:
-        await ctx.send("only admins can change the clip")
-    else:
         await change_male(new_male_clip, new_correct_male)
-        await ctx.send(f"male clip updated")
+        await interaction.response.send_message(f"clips updated")
+
 
 # Define the quiz ID (assuming it's the same for both female and male quizzes)
 quiz_id = 1  # You should replace this with the actual quiz ID
