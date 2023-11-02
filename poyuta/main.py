@@ -8,7 +8,8 @@ from discord import app_commands
 from discord.ext import commands
 
 # Database
-from poyuta.database import User, SessionFactory
+from poyuta.database import User, Quiz, Answer, SessionFactory
+
 
 # Utils
 from poyuta.utils import (
@@ -16,6 +17,7 @@ from poyuta.utils import (
     extract_answer_from_user_input,
     process_user_input,
 )
+
 
 config = load_environment()
 
@@ -84,37 +86,27 @@ async def currentclips(ctx):
         await ctx.send("no clips in progress")
 
 
+# 'newfemale' command
 @bot.command()
 async def newfemale(ctx, new_female_clip, new_correct_female):
-    print(ctx.author.id)
+    user = None
 
-    # example usage for adding a user to the database
-    # get current user
+    # Get the user, including the 'answers' relationship
     with bot.session as session:
         user = session.query(User).filter(User.discord_id == ctx.author.id).first()
 
-    # if user doesn't exist, add them to the database
     if not user:
         with bot.session as session:
             print("adding user to database:", ctx.author.id, ctx.author.name)
-            # add it and keep the user object
             user = User(discord_id=ctx.author.id, name=ctx.author.name)
             session.add(user)
             session.commit()
-
-    # example accessing all answers from users (they aren't added to the database yet, so it's empty, but you get the idea)
-    # you can access directly from answers attribute because of relationship defined in database.py (back_populates)
-    with bot.session as session:
-        user = session.query(User).filter(User.discord_id == ctx.author.id).first()
-        print(user)
-        print(user.answers)
 
     if ctx.author.id not in admin_user_ids:
         await ctx.send("only admins can change the clip")
     else:
         await change_female(new_female_clip, new_correct_female)
         await ctx.send(f"female clip updated")
-
 
 @bot.command()
 async def newmale(ctx, new_male_clip, new_correct_male):
@@ -124,26 +116,77 @@ async def newmale(ctx, new_male_clip, new_correct_male):
         await change_male(new_male_clip, new_correct_male)
         await ctx.send(f"male clip updated")
 
+# Define the quiz ID (assuming it's the same for both female and male quizzes)
+quiz_id = 1  # You should replace this with the actual quiz ID
 
+# Modify the 'female' command
 @bot.tree.command(name="female")
 @app_commands.describe(seiyuu_female="guess the female seiyuu")
 async def female(interaction: discord.Interaction, seiyuu_female: str):
     user_answer_pattern = process_user_input(seiyuu_female)
     if re.search(user_answer_pattern, correct_female):
-        await interaction.response.send_message(
-            f"you guessed it **correctly** :muscle:"
-        )
+        await interaction.response.send_message(f"you guessed it **correctly** :muscle:")
+
+        # Store the user's answer in the database using the Answer table
+        with bot.session as session:
+            user = session.query(User).filter(User.discord_id == interaction.user.id).first()
+            if user:
+                user_answer = Answer(
+                    user_id=interaction.user.id,
+                    quiz_id=quiz_id,
+                    answer=seiyuu_female,
+                    answer_type="female",
+                    is_correct=True
+                )
+                session.add(user_answer)
+                session.commit()
     else:
         await interaction.response.send_message(f"**incorrect** :skull:")
+        with bot.session as session:
+            user = session.query(User).filter(User.discord_id == interaction.user.id).first()
+            if user:
+                user_answer = Answer(
+                    user_id=interaction.user.id,
+                    quiz_id=quiz_id,
+                    answer=seiyuu_female,
+                    answer_type="female",
+                    is_correct=False
+                )
+                session.add(user_answer)
+                session.commit()
 
-
+# Modify the 'male' command similarly
 @bot.tree.command(name="male")
 @app_commands.describe(seiyuu_male="guess the male seiyuu")
 async def male(interaction: discord.Interaction, seiyuu_male: str):
     user_answer_pattern = process_user_input(seiyuu_male)
     if re.search(user_answer_pattern, correct_male):
-        await interaction.response.send_message(
-            f":fearful: you guessed it **correctly**"
-        )
+        await interaction.response.send_message(f":fearful: you guessed it **correctly**")
+
+        # Store the user's answer in the database using the Answer table
+        with bot.session as session:
+            user = session.query(User).filter(User.discord_id == interaction.user.id).first()
+            if user:
+                user_answer = Answer(
+                    user_id=interaction.user.id,
+                    quiz_id=quiz_id,
+                    answer=seiyuu_male,
+                    answer_type="male",
+                    is_correct=True
+                )
+                session.add(user_answer)
+                session.commit()
     else:
         await interaction.response.send_message(f"**incorrect** :skull:")
+        with bot.session as session:
+            user = session.query(User).filter(User.discord_id == interaction.user.id).first()
+            if user:
+                user_answer = Answer(
+                    user_id=interaction.user.id,
+                    quiz_id=quiz_id,
+                    answer=seiyuu_male,
+                    answer_type="male",
+                    is_correct=False
+                )
+                session.add(user_answer)
+                session.commit()
