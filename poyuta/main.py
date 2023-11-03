@@ -88,7 +88,7 @@ async def currentclips(ctx):
 
 # 'newfemale' command
 @bot.tree.command(name="newquiz")
-@app_commands.describe(new_female_clip="input new clips and seiyuu")
+@app_commands.describe(new_female_clip="input new clip for female")
 async def newquiz(interaction: discord.Interaction, new_female_clip: str, new_correct_female: str, new_male_clip: str, new_correct_male: str):
     user = None
 
@@ -109,6 +109,20 @@ async def newquiz(interaction: discord.Interaction, new_female_clip: str, new_co
         await change_female(new_female_clip, new_correct_female)
         await change_male(new_male_clip, new_correct_male)
         await interaction.response.send_message(f"clips updated")
+    # Get the user, including the 'answers' relationship
+        with bot.session as session:
+            quiz_edit = Quiz(
+                    female_clip=new_female_clip,
+                    female_answer=new_correct_female,
+                    male_clip=new_male_clip,
+                    male_answer=new_correct_male
+                )
+            session.add(quiz_edit)
+            session.commit()
+
+        print("adding quiz to database:", interaction.user.id, interaction.user.name)
+
+
 
 
 # Define the quiz ID (assuming it's the same for both female and male quizzes)
