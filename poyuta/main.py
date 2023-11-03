@@ -86,19 +86,29 @@ async def currentclips(ctx):
         await ctx.send("no clips in progress")
 
 
-# 'newfemale' command
+# 'newquiz' command
 @bot.tree.command(name="newquiz")
 @app_commands.describe(new_female_clip="input new clip for female")
-async def newquiz(interaction: discord.Interaction, new_female_clip: str, new_correct_female: str, new_male_clip: str, new_correct_male: str):
+async def newquiz(
+    interaction: discord.Interaction,
+    new_female_clip: str,
+    new_correct_female: str,
+    new_male_clip: str,
+    new_correct_male: str,
+):
     user = None
 
     # Get the user, including the 'answers' relationship
     with bot.session as session:
-        user = session.query(User).filter(User.discord_id == interaction.user.id).first()
+        user = (
+            session.query(User).filter(User.discord_id == interaction.user.id).first()
+        )
 
     if not user:
         with bot.session as session:
-            print("adding user to database:", interaction.user.id, interaction.user.name)
+            print(
+                "adding user to database:", interaction.user.id, interaction.user.name
+            )
             user = User(discord_id=interaction.user.id, name=interaction.user.name)
             session.add(user)
             session.commit()
@@ -109,24 +119,23 @@ async def newquiz(interaction: discord.Interaction, new_female_clip: str, new_co
         await change_female(new_female_clip, new_correct_female)
         await change_male(new_male_clip, new_correct_male)
         await interaction.response.send_message(f"clips updated")
-    # Get the user, including the 'answers' relationship
+        # Get the user, including the 'answers' relationship
         with bot.session as session:
             quiz_edit = Quiz(
-                    female_clip=new_female_clip,
-                    female_answer=new_correct_female,
-                    male_clip=new_male_clip,
-                    male_answer=new_correct_male
-                )
+                female_clip=new_female_clip,
+                female_answer=new_correct_female,
+                male_clip=new_male_clip,
+                male_answer=new_correct_male,
+            )
             session.add(quiz_edit)
             session.commit()
 
         print("adding quiz to database:", interaction.user.id, interaction.user.name)
 
 
-
-
 # Define the quiz ID (assuming it's the same for both female and male quizzes)
 quiz_id = 1  # You should replace this with the actual quiz ID
+
 
 # Modify the 'female' command
 @bot.tree.command(name="female")
@@ -134,35 +143,46 @@ quiz_id = 1  # You should replace this with the actual quiz ID
 async def female(interaction: discord.Interaction, seiyuu_female: str):
     user_answer_pattern = process_user_input(seiyuu_female)
     if re.search(user_answer_pattern, correct_female):
-        await interaction.response.send_message(f"you guessed it **correctly** :muscle:")
+        await interaction.response.send_message(
+            f"you guessed it **correctly** :muscle:"
+        )
 
         # Store the user's answer in the database using the Answer table
         with bot.session as session:
-            user = session.query(User).filter(User.discord_id == interaction.user.id).first()
+            user = (
+                session.query(User)
+                .filter(User.discord_id == interaction.user.id)
+                .first()
+            )
             if user:
                 user_answer = Answer(
                     user_id=interaction.user.id,
                     quiz_id=quiz_id,
                     answer=seiyuu_female,
                     answer_type="female",
-                    is_correct=True
+                    is_correct=True,
                 )
                 session.add(user_answer)
                 session.commit()
     else:
         await interaction.response.send_message(f"**incorrect** :skull:")
         with bot.session as session:
-            user = session.query(User).filter(User.discord_id == interaction.user.id).first()
+            user = (
+                session.query(User)
+                .filter(User.discord_id == interaction.user.id)
+                .first()
+            )
             if user:
                 user_answer = Answer(
                     user_id=interaction.user.id,
                     quiz_id=quiz_id,
                     answer=seiyuu_female,
                     answer_type="female",
-                    is_correct=False
+                    is_correct=False,
                 )
                 session.add(user_answer)
                 session.commit()
+
 
 # Modify the 'male' command similarly
 @bot.tree.command(name="male")
@@ -170,32 +190,42 @@ async def female(interaction: discord.Interaction, seiyuu_female: str):
 async def male(interaction: discord.Interaction, seiyuu_male: str):
     user_answer_pattern = process_user_input(seiyuu_male)
     if re.search(user_answer_pattern, correct_male):
-        await interaction.response.send_message(f":fearful: you guessed it **correctly**")
+        await interaction.response.send_message(
+            f":fearful: you guessed it **correctly**"
+        )
 
         # Store the user's answer in the database using the Answer table
         with bot.session as session:
-            user = session.query(User).filter(User.discord_id == interaction.user.id).first()
+            user = (
+                session.query(User)
+                .filter(User.discord_id == interaction.user.id)
+                .first()
+            )
             if user:
                 user_answer = Answer(
                     user_id=interaction.user.id,
                     quiz_id=quiz_id,
                     answer=seiyuu_male,
                     answer_type="male",
-                    is_correct=True
+                    is_correct=True,
                 )
                 session.add(user_answer)
                 session.commit()
     else:
         await interaction.response.send_message(f"**incorrect** :skull:")
         with bot.session as session:
-            user = session.query(User).filter(User.discord_id == interaction.user.id).first()
+            user = (
+                session.query(User)
+                .filter(User.discord_id == interaction.user.id)
+                .first()
+            )
             if user:
                 user_answer = Answer(
                     user_id=interaction.user.id,
                     quiz_id=quiz_id,
                     answer=seiyuu_male,
                     answer_type="male",
-                    is_correct=False
+                    is_correct=False,
                 )
                 session.add(user_answer)
                 session.commit()

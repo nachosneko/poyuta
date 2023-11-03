@@ -17,6 +17,7 @@ engine = create_engine(
 )
 SessionFactory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+
 # Define the Quiz class
 class Quiz(Base):
     __tablename__ = "quiz"
@@ -26,12 +27,14 @@ class Quiz(Base):
     male_answer = sa.Column(sa.String, nullable=False)
     male_clip = sa.Column(sa.String, nullable=False)
 
+
 # Define the User class
 class User(Base):
     __tablename__ = "users"
     id = sa.Column(sa.Integer, primary_key=True)
     discord_id = sa.Column(sa.Integer, unique=True, nullable=False)
     name = sa.Column(sa.String, nullable=False)
+
 
 # Define the Answer class with a unique backref name
 class Answer(Base):
@@ -44,6 +47,7 @@ class Answer(Base):
     is_correct = sa.Column(sa.Boolean, nullable=False)
     user = relationship("User", backref="user_answers")  # Use a unique name
     quiz = relationship("Quiz", backref="answers")
+
 
 # Create the tables
 Base.metadata.create_all(bind=engine)
