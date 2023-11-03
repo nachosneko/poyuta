@@ -12,11 +12,7 @@ from poyuta.database import User, Quiz, Answer, SessionFactory
 
 
 # Utils
-from poyuta.utils import (
-    load_environment,
-    extract_answer_from_user_input,
-    process_user_input,
-)
+from poyuta.utils import load_environment, process_user_input
 
 
 config = load_environment()

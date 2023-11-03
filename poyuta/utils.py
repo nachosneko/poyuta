@@ -183,39 +183,3 @@ def process_user_input(
     output_str = f"({output_str})|({swapped_output_str})"
 
     return output_str
-
-
-def extract_answer_from_user_input(user_input: str) -> str:
-    """Extract the answer from a user input.
-    The answer is the part of the user input, which start with either
-    `female` or `male` and is inbetween the two `||`.
-
-    Parameters
-    ----------
-    user_input : str
-        User input.
-
-    Returns
-    -------
-    str
-        The extracted answer or None if no answer is found.
-
-    Examples
-    --------
-    - `female ||Saori Hayami||` -> `Saori Hayami`
-    - `male ||Yuuichi Nakamura||` -> `Yuuichi Nakamura`
-    - `blah blah` -> None
-    """
-
-    # Define a pattern to search for the answer
-    pattern = re.compile(r"(female|male)\s+\|\|(.+?)\|\|")
-
-    # Use the pattern to search for matches in the message
-    match = pattern.search(user_input)
-
-    # Return None if no match is found
-    if not match:
-        return None
-
-    # Otherwise, return the "answer" part
-    return match.group(2)
