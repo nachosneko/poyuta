@@ -8,7 +8,7 @@ from discord import app_commands
 from discord.ext import commands
 
 # Database
-from poyuta.database import User, Quiz, Answer, SessionFactory
+from poyuta.database import User, Quiz, Answer, SessionFactory, initialize_database
 
 # Utils
 from poyuta.utils import (
@@ -26,6 +26,18 @@ intents.reactions = True
 intents.messages = True
 
 
+def is_admin(user):
+    with bot.session as session:
+        admins = session.query(User).filter(User.is_admin == True).all()
+
+    if user.id in [admin.id for admin in admins]:
+        print(f"{user.name} is admin")
+        return True
+    else:
+        print(f"{user.name} is not admin")
+        return False
+
+
 # Update your bot class to include the session property
 class PoyutaBot(commands.Bot):
     def __init__(self, command_prefix, intents):
@@ -41,17 +53,13 @@ class PoyutaBot(commands.Bot):
 # Instantiate your bot
 bot = PoyutaBot(command_prefix="!", intents=intents)
 
-admin_user_ids = [
-    195534572581158913,
-    240181741703266304,
-]  # Replace with the admin user IDs
-# TODO : define in database ? Possibility to add new admin id from commands ?
-# TODO : hide commands if user is not admin
-
 
 @bot.event
 async def on_ready():
     print(f"logged in as {bot.user.name}")
+
+    initialize_database(config["DEFAULT_ADMIN_ID"], config["DEFAULT_ADMIN_NAME"])
+
     try:
         synced = await bot.tree.sync()
         print(f"synced {len(synced)} command(s)")
@@ -75,6 +83,12 @@ async def newquiz(
 ):
     """Create a new quiz."""
 
+    if not is_admin(interaction.user):
+        await interaction.response.send_message(
+            "You are not an admin, you can't use this command"
+        )
+        return
+
     # get latest quiz from database
     with bot.session as session:
         latest_quiz = session.query(Quiz).order_by(Quiz.date.desc()).first()
@@ -83,6 +97,7 @@ async def newquiz(
             latest_quiz_date = latest_quiz.date
         else:
             latest_quiz_date = datetime.now() - timedelta(days=1)
+            latest_quiz_date = latest_quiz_date.date()
 
     # get current date
     current_date = datetime.now().date()
@@ -95,23 +110,19 @@ async def newquiz(
     else:
         new_date = current_date
 
-    # if not an admin : return
-    if interaction.user.id not in admin_user_ids:
-        await interaction.response.send_message("only admins can change the clips")
-    else:
-        # add new quiz to database
-        with bot.session as session:
-            new_quiz = Quiz(
-                female_clip=new_female_clip,
-                female_answer=new_correct_female,
-                male_clip=new_male_clip,
-                male_answer=new_correct_male,
-                date=new_date,
-            )
-            session.add(new_quiz)
-            session.commit()
+    # add the new quiz to database
+    with bot.session as session:
+        new_quiz = Quiz(
+            female_clip=new_female_clip,
+            female_answer=new_correct_female,
+            male_clip=new_male_clip,
+            male_answer=new_correct_male,
+            date=new_date,
+        )
+        session.add(new_quiz)
+        session.commit()
 
-        await interaction.response.send_message("clips updated")
+    await interaction.response.send_message("clips updated")
 
 
 @bot.tree.command(name="female")

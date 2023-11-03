@@ -3,7 +3,7 @@ from pathlib import Path
 
 # SQLAlchemy
 import sqlalchemy as sa
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 
@@ -37,6 +37,7 @@ class User(Base):
     __tablename__ = "users"
     id = sa.Column(sa.Integer, primary_key=True)
     name = sa.Column(sa.String, nullable=False)
+    is_admin = sa.Column(sa.Boolean, nullable=False, default=False)
 
 
 # Define the Answer class with a unique backref name
@@ -48,9 +49,25 @@ class Answer(Base):
     answer = sa.Column(sa.String, nullable=False)
     answer_type = sa.Column(sa.String, nullable=False)
     is_correct = sa.Column(sa.Boolean, nullable=False)
-    user = relationship("User", backref="user_answers")  # Use a unique name
-    quiz = relationship("Quiz", backref="answers")
+    user = relationship(User, backref="user_answers")  # Use a unique name
+    quiz = relationship(Quiz, backref="answers")
 
 
-# Create the tables
-Base.metadata.create_all(bind=engine)
+def initialize_database(default_admin_id, default_admin_name):
+    inspector = inspect(engine)
+
+    if not inspector.has_table("users") or not inspector.has_table("quiz"):
+        # Create the tables
+        Base.metadata.create_all(bind=engine)
+
+        # Create a session
+        session = SessionFactory()
+
+        # add the default admin user
+        default_admin = User(
+            id=default_admin_id, name=default_admin_name, is_admin=True
+        )
+        session.add(default_admin)
+        session.commit()
+
+        print(f"Default admin user ({default_admin_name}) created.")

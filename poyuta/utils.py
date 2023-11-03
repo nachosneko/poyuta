@@ -220,7 +220,10 @@ def get_current_quiz(bot_session):
 
 
 def get_user_from_id(
-    bot_session: Session, user_id: int, user_name: str, add_if_not_exist: bool = True
+    bot_session: Session,
+    user_id: int,
+    user_name: str,
+    add_if_not_exist: bool = True,
 ):
     """Get the user from the database."""
 
@@ -228,7 +231,7 @@ def get_user_from_id(
         user = session.query(User).filter(User.id == user_id).first()
 
         if not user and add_if_not_exist:
-            user = User(id=user_id, name=user_name)
+            user = User(id=user_id, name=user_name, is_admin=False)
             session.add(user)
             session.commit()
 
