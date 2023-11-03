@@ -1,6 +1,6 @@
 # Standard libraries
 import re
-
+from datetime import datetime, timedelta
 
 # Discord
 import discord
@@ -8,14 +8,14 @@ from discord import app_commands
 from discord.ext import commands
 
 # Database
-from poyuta.database import User, Quiz, Answer, SessionFactory
-
+from poyuta.database import User, Quiz, Answer, SessionFactory, initialize_database
 
 # Utils
 from poyuta.utils import (
     load_environment,
-    extract_answer_from_user_input,
     process_user_input,
+    get_current_quiz,
+    get_user_from_id,
 )
 
 
@@ -24,6 +24,16 @@ config = load_environment()
 intents = discord.Intents.all()
 intents.reactions = True
 intents.messages = True
+
+
+def is_admin(user):
+    with bot.session as session:
+        admins = session.query(User).filter(User.is_admin == True).all()
+
+    if user.id in [admin.id for admin in admins]:
+        return True
+    else:
+        return False
 
 
 # Update your bot class to include the session property
@@ -41,34 +51,13 @@ class PoyutaBot(commands.Bot):
 # Instantiate your bot
 bot = PoyutaBot(command_prefix="!", intents=intents)
 
-# Store game state (current female clip and correct answer)
-current_female_clip = "none yet..."
-current_male_clip = "none yet..."
-correct_female = "?"
-correct_male = "?"
-admin_user_ids = [
-    195534572581158913,
-    240181741703266304,
-]  # Replace with the admin user IDs
-# TODO : define in database ? Possibility to add new admin id from commands ?
-
-
-# Function to change the quiz audio and correct answer
-async def change_female(new_female_clip, new_correct_female):
-    global current_female_clip, correct_female
-    current_female_clip = new_female_clip
-    correct_female = new_correct_female
-
-
-async def change_male(new_male_clip, new_correct_male):
-    global current_male_clip, correct_male
-    current_male_clip = new_male_clip
-    correct_male = new_correct_male
-
 
 @bot.event
 async def on_ready():
     print(f"logged in as {bot.user.name}")
+
+    initialize_database(config["DEFAULT_ADMIN_ID"], config["DEFAULT_ADMIN_NAME"])
+
     try:
         synced = await bot.tree.sync()
         print(f"synced {len(synced)} command(s)")
@@ -76,126 +65,165 @@ async def on_ready():
         print(e)
 
 
-@bot.command()
-async def currentclips(ctx):
-    if current_female_clip:
-        await ctx.send(current_female_clip)
-    if current_male_clip:
-        await ctx.send(current_male_clip)
-    else:
-        await ctx.send("no clips in progress")
-
-
-# 'newfemale' command
 @bot.tree.command(name="newquiz")
-@app_commands.describe(new_female_clip="input new clip for female")
-async def newquiz(interaction: discord.Interaction, new_female_clip: str, new_correct_female: str, new_male_clip: str, new_correct_male: str):
-    user = None
+@app_commands.describe(
+    new_female_clip="input new clip for female",
+    new_correct_female="input new seiyuu for female clip",
+    new_male_clip="input new clip for male",
+    new_correct_male="input new seiyuu for male clip",
+)
+async def newquiz(
+    interaction: discord.Interaction,
+    new_female_clip: str,
+    new_correct_female: str,
+    new_male_clip: str,
+    new_correct_male: str,
+):
+    """Create a new quiz."""
 
-    # Get the user, including the 'answers' relationship
+    if not is_admin(interaction.user):
+        await interaction.response.send_message(
+            "You are not an admin, you can't use this command"
+        )
+        return
+
+    # get latest quiz from database
     with bot.session as session:
-        user = session.query(User).filter(User.discord_id == interaction.user.id).first()
+        latest_quiz = session.query(Quiz).order_by(Quiz.date.desc()).first()
+        # latest quiz date is the date of the latest quiz if it exists, else it defaults to yesterday
+        if latest_quiz:
+            latest_quiz_date = latest_quiz.date
+        else:
+            latest_quiz_date = datetime.now() - timedelta(days=1)
+            latest_quiz_date = latest_quiz_date.date()
 
-    if not user:
-        with bot.session as session:
-            print("adding user to database:", interaction.user.id, interaction.user.name)
-            user = User(discord_id=interaction.user.id, name=interaction.user.name)
-            session.add(user)
-            session.commit()
+    # get current date
+    current_date = datetime.now().date()
 
-    if interaction.user.id not in admin_user_ids:
-        await interaction.response.send_message(f"only admins can change the clips")
+    # if the current date is before the latest quiz date
+    # that means there's already a quiz for today, so set the new date to the latest quiz date + 1 day
+    if current_date <= latest_quiz_date:
+        new_date = latest_quiz_date + timedelta(days=1)
+    # else set the new date to the current date
     else:
-        await change_female(new_female_clip, new_correct_female)
-        await change_male(new_male_clip, new_correct_male)
-        await interaction.response.send_message(f"clips updated")
-    # Get the user, including the 'answers' relationship
-        with bot.session as session:
-            quiz_edit = Quiz(
-                    female_clip=new_female_clip,
-                    female_answer=new_correct_female,
-                    male_clip=new_male_clip,
-                    male_answer=new_correct_male
-                )
-            session.add(quiz_edit)
-            session.commit()
+        new_date = current_date
 
-        print("adding quiz to database:", interaction.user.id, interaction.user.name)
+    # add the new quiz to database
+    with bot.session as session:
+        new_quiz = Quiz(
+            female_clip=new_female_clip,
+            female_answer=new_correct_female,
+            male_clip=new_male_clip,
+            male_answer=new_correct_male,
+            date=new_date,
+        )
+        session.add(new_quiz)
+        session.commit()
 
-
+    await interaction.response.send_message(f"New quiz created for {new_date}")
 
 
-# Define the quiz ID (assuming it's the same for both female and male quizzes)
-quiz_id = 1  # You should replace this with the actual quiz ID
-
-# Modify the 'female' command
 @bot.tree.command(name="female")
-@app_commands.describe(seiyuu_female="guess the female seiyuu")
-async def female(interaction: discord.Interaction, seiyuu_female: str):
-    user_answer_pattern = process_user_input(seiyuu_female)
-    if re.search(user_answer_pattern, correct_female):
-        await interaction.response.send_message(f"you guessed it **correctly** :muscle:")
+@app_commands.describe(seiyuu="guess the female seiyuu")
+async def female(interaction: discord.Interaction, seiyuu: str):
+    """Guess the seiyuu for the current female clip."""
 
-        # Store the user's answer in the database using the Answer table
+    quiz = get_current_quiz(bot.session)
+
+    if not quiz:
+        await interaction.response.send_message("no quiz today :(")
+
+    user = get_user_from_id(
+        bot_session=bot.session,
+        user_id=interaction.user.id,
+        user_name=interaction.user.name,
+        add_if_not_exist=True,
+    )
+
+    # create the answer object
+    user_answer = Answer(
+        user_id=user.id,
+        quiz_id=quiz.id,
+        answer=seiyuu,
+        answer_type="female",
+    )
+
+    # Generate a pattern to match with the correct answer
+    user_answer_pattern = process_user_input(seiyuu)
+
+    # If the pattern matches : the answer is correct
+    if re.search(user_answer_pattern, quiz.female_answer):
+        # Send feedback to the user
+        await interaction.response.send_message(
+            ":fearful: you guessed it **correctly**"
+        )
+
+        # Store the user's answer in the Answer table
         with bot.session as session:
-            user = session.query(User).filter(User.discord_id == interaction.user.id).first()
-            if user:
-                user_answer = Answer(
-                    user_id=interaction.user.id,
-                    quiz_id=quiz_id,
-                    answer=seiyuu_female,
-                    answer_type="female",
-                    is_correct=True
-                )
-                session.add(user_answer)
-                session.commit()
+            user_answer.is_correct = True
+            session.add(user_answer)
+            session.commit()
+
+    # Otherwise, the pattern doesn't match : the answer is incorrect
     else:
-        await interaction.response.send_message(f"**incorrect** :skull:")
-        with bot.session as session:
-            user = session.query(User).filter(User.discord_id == interaction.user.id).first()
-            if user:
-                user_answer = Answer(
-                    user_id=interaction.user.id,
-                    quiz_id=quiz_id,
-                    answer=seiyuu_female,
-                    answer_type="female",
-                    is_correct=False
-                )
-                session.add(user_answer)
-                session.commit()
+        # Send feedback to the user
+        await interaction.response.send_message("**incorrect** :skull:")
 
-# Modify the 'male' command similarly
+        # Store the user's answer in the Answer table
+        with bot.session as session:
+            user_answer.is_correct = False
+            session.add(user_answer)
+            session.commit()
+
+
 @bot.tree.command(name="male")
-@app_commands.describe(seiyuu_male="guess the male seiyuu")
-async def male(interaction: discord.Interaction, seiyuu_male: str):
-    user_answer_pattern = process_user_input(seiyuu_male)
-    if re.search(user_answer_pattern, correct_male):
-        await interaction.response.send_message(f":fearful: you guessed it **correctly**")
+@app_commands.describe(seiyuu="guess the male seiyuu")
+async def male(interaction: discord.Interaction, seiyuu: str):
+    """Guess the seiyuu for the current male clip."""
 
-        # Store the user's answer in the database using the Answer table
+    quiz = get_current_quiz(bot.session)
+
+    if not quiz:
+        await interaction.response.send_message("no quiz today :(")
+
+    user = get_user_from_id(
+        bot_session=bot.session,
+        user_id=interaction.user.id,
+        user_name=interaction.user.name,
+        add_if_not_exist=True,
+    )
+
+    # create the answer object
+    user_answer = Answer(
+        user_id=user.id,
+        quiz_id=quiz.id,
+        answer=seiyuu,
+        answer_type="male",
+    )
+
+    # Generate a pattern to match with the correct answer
+    user_answer_pattern = process_user_input(seiyuu)
+
+    # If the pattern matches : the answer is correct
+    if re.search(user_answer_pattern, quiz.male_answer):
+        # Send feedback to the user
+        await interaction.response.send_message(
+            ":fearful: you guessed it **correctly**"
+        )
+
+        # Store the user's answer in the Answer table
         with bot.session as session:
-            user = session.query(User).filter(User.discord_id == interaction.user.id).first()
-            if user:
-                user_answer = Answer(
-                    user_id=interaction.user.id,
-                    quiz_id=quiz_id,
-                    answer=seiyuu_male,
-                    answer_type="male",
-                    is_correct=True
-                )
-                session.add(user_answer)
-                session.commit()
+            user_answer.is_correct = True
+            session.add(user_answer)
+            session.commit()
+
+    # Otherwise, the pattern doesn't match : the answer is incorrect
     else:
-        await interaction.response.send_message(f"**incorrect** :skull:")
+        # Send feedback to the user
+        await interaction.response.send_message("**incorrect** :skull:")
+
+        # Store the user's answer in the Answer table
         with bot.session as session:
-            user = session.query(User).filter(User.discord_id == interaction.user.id).first()
-            if user:
-                user_answer = Answer(
-                    user_id=interaction.user.id,
-                    quiz_id=quiz_id,
-                    answer=seiyuu_male,
-                    answer_type="male",
-                    is_correct=False
-                )
-                session.add(user_answer)
-                session.commit()
+            user_answer.is_correct = False
+            session.add(user_answer)
+            session.commit()
