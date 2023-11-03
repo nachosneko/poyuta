@@ -31,10 +31,8 @@ def is_admin(user):
         admins = session.query(User).filter(User.is_admin == True).all()
 
     if user.id in [admin.id for admin in admins]:
-        print(f"{user.name} is admin")
         return True
     else:
-        print(f"{user.name} is not admin")
         return False
 
 
@@ -122,7 +120,7 @@ async def newquiz(
         session.add(new_quiz)
         session.commit()
 
-    await interaction.response.send_message("clips updated")
+    await interaction.response.send_message(f"New quiz created for {new_date}")
 
 
 @bot.tree.command(name="female")
