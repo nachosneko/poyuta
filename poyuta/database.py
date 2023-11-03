@@ -1,8 +1,11 @@
+# standard libraries
+from pathlib import Path
+
+# SQLAlchemy
 import sqlalchemy as sa
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
-from pathlib import Path
 
 # Define a unique name for the User class
 Base = declarative_base()
@@ -26,6 +29,7 @@ class Quiz(Base):
     female_clip = sa.Column(sa.String, nullable=False)
     male_answer = sa.Column(sa.String, nullable=False)
     male_clip = sa.Column(sa.String, nullable=False)
+    date = sa.Column(sa.Date, nullable=False)
 
 
 # Define the User class

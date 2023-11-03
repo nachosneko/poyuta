@@ -1,6 +1,6 @@
 # Standard libraries
 import re
-
+from datetime import datetime, timedelta
 
 # Discord
 import discord
@@ -10,9 +10,13 @@ from discord.ext import commands
 # Database
 from poyuta.database import User, Quiz, Answer, SessionFactory
 
-
 # Utils
-from poyuta.utils import load_environment, process_user_input
+from poyuta.utils import (
+    load_environment,
+    process_user_input,
+    get_current_quiz,
+    get_user_from_id,
+)
 
 
 config = load_environment()
@@ -37,16 +41,12 @@ class PoyutaBot(commands.Bot):
 # Instantiate your bot
 bot = PoyutaBot(command_prefix="!", intents=intents)
 
-# Store game state (current female clip and correct answer)
-current_female_clip = "none yet..."
-current_male_clip = "none yet..."
-correct_female = "?"
-correct_male = "?"
 admin_user_ids = [
     195534572581158913,
     240181741703266304,
 ]  # Replace with the admin user IDs
 # TODO : define in database ? Possibility to add new admin id from commands ?
+# TODO : hide commands if user is not admin
 
 
 # Function to change the quiz audio and correct answer
@@ -98,34 +98,43 @@ async def newquiz(
 ):
     """Create a new quiz."""
 
+    # get latest quiz from database
     with bot.session as session:
-        user = session.query(User).filter(User.id == interaction.user.id).first()
+        latest_quiz = session.query(Quiz).order_by(Quiz.date.desc()).first()
+        # latest quiz date is the date of the latest quiz if it exists, else it defaults to yesterday
+        if latest_quiz:
+            latest_quiz_date = latest_quiz.date
+        else:
+            latest_quiz_date = datetime.now() - timedelta(days=1)
 
-        if not user:
-            user = User(id=interaction.user.id, name=interaction.user.name)
-            session.add(user)
-            session.commit()
+    # get current date
+    current_date = datetime.now().date()
 
+    # if the current date is before the latest quiz date
+    # that means there's already a quiz for today, so set the new date to the latest quiz date + 1 day
+    if current_date <= latest_quiz_date:
+        new_date = latest_quiz_date + timedelta(days=1)
+    # else set the new date to the current date
+    else:
+        new_date = current_date
+
+    # if not an admin : return
     if interaction.user.id not in admin_user_ids:
         await interaction.response.send_message("only admins can change the clips")
     else:
-        await change_female(new_female_clip, new_correct_female)
-        await change_male(new_male_clip, new_correct_male)
-        await interaction.response.send_message("clips updated")
-
+        # add new quiz to database
         with bot.session as session:
             new_quiz = Quiz(
                 female_clip=new_female_clip,
                 female_answer=new_correct_female,
                 male_clip=new_male_clip,
                 male_answer=new_correct_male,
+                date=new_date,
             )
             session.add(new_quiz)
             session.commit()
 
-
-# Define the quiz ID (assuming it's the same for both female and male quizzes)
-quiz_id = 1  # You should replace this with the actual quiz ID
+        await interaction.response.send_message("clips updated")
 
 
 @bot.tree.command(name="female")
@@ -133,19 +142,22 @@ quiz_id = 1  # You should replace this with the actual quiz ID
 async def female(interaction: discord.Interaction, seiyuu: str):
     """Guess the seiyuu for the current female clip."""
 
-    # retrieve user from database, and add it if it doesn't exist
-    with bot.session as session:
-        user = session.query(User).filter(User.id == interaction.user.id).first()
+    quiz = get_current_quiz(bot.session)
 
-        if not user:
-            user = User(id=interaction.user.id, name=interaction.user.name)
-            session.add(user)
-            session.commit()
+    if not quiz:
+        await interaction.response.send_message("no quiz today :(")
+
+    user = get_user_from_id(
+        bot_session=bot.session,
+        user_id=interaction.user.id,
+        user_name=interaction.user.name,
+        add_if_not_exist=True,
+    )
 
     # create the answer object
     user_answer = Answer(
         user_id=user.id,
-        quiz_id=quiz_id,
+        quiz_id=quiz.id,
         answer=seiyuu,
         answer_type="female",
     )
@@ -154,7 +166,7 @@ async def female(interaction: discord.Interaction, seiyuu: str):
     user_answer_pattern = process_user_input(seiyuu)
 
     # If the pattern matches : the answer is correct
-    if re.search(user_answer_pattern, correct_female):
+    if re.search(user_answer_pattern, quiz.female_answer):
         # Send feedback to the user
         await interaction.response.send_message(
             ":fearful: you guessed it **correctly**"
@@ -183,19 +195,22 @@ async def female(interaction: discord.Interaction, seiyuu: str):
 async def male(interaction: discord.Interaction, seiyuu: str):
     """Guess the seiyuu for the current male clip."""
 
-    # retrieve user from database, and add it if it doesn't exist
-    with bot.session as session:
-        user = session.query(User).filter(User.id == interaction.user.id).first()
+    quiz = get_current_quiz(bot.session)
 
-        if not user:
-            user = User(id=interaction.user.id, name=interaction.user.name)
-            session.add(user)
-            session.commit()
+    if not quiz:
+        await interaction.response.send_message("no quiz today :(")
+
+    user = get_user_from_id(
+        bot_session=bot.session,
+        user_id=interaction.user.id,
+        user_name=interaction.user.name,
+        add_if_not_exist=True,
+    )
 
     # create the answer object
     user_answer = Answer(
         user_id=user.id,
-        quiz_id=quiz_id,
+        quiz_id=quiz.id,
         answer=seiyuu,
         answer_type="male",
     )
@@ -204,7 +219,7 @@ async def male(interaction: discord.Interaction, seiyuu: str):
     user_answer_pattern = process_user_input(seiyuu)
 
     # If the pattern matches : the answer is correct
-    if re.search(user_answer_pattern, correct_male):
+    if re.search(user_answer_pattern, quiz.male_answer):
         # Send feedback to the user
         await interaction.response.send_message(
             ":fearful: you guessed it **correctly**"

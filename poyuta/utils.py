@@ -5,9 +5,16 @@ Utility functions for the bot.
 # Standard library imports
 import os
 import re
+from datetime import datetime
 
 # Third party imports
 from dotenv import dotenv_values
+
+# Database models
+from poyuta.database import Quiz, Answer, User
+
+# Typing helpers
+from sqlalchemy.orm.session import Session
 
 # Define a list of replacement rules
 ANIME_REGEX_REPLACE_RULES = [
@@ -183,3 +190,46 @@ def process_user_input(
     output_str = f"({output_str})|({swapped_output_str})"
 
     return output_str
+
+
+def get_current_quiz(bot_session):
+    """Get the current quiz from the database."""
+
+    with bot_session as session:
+        # get today's date
+        today = datetime.now().date()
+
+        # get today's quiz
+        quiz = (
+            session.query(Quiz)
+            .filter(Quiz.date == today)
+            .order_by(Quiz.id.desc())
+            .first()
+        )
+
+        # if no quiz today, backup with latest quiz before today
+        if not quiz:
+            quiz = (
+                session.query(Quiz)
+                .filter(Quiz.date < today)
+                .order_by(Quiz.id.desc())
+                .first()
+            )
+
+        return quiz
+
+
+def get_user_from_id(
+    bot_session: Session, user_id: int, user_name: str, add_if_not_exist: bool = True
+):
+    """Get the user from the database."""
+
+    with bot_session as session:
+        user = session.query(User).filter(User.id == user_id).first()
+
+        if not user and add_if_not_exist:
+            user = User(id=user_id, name=user_name)
+            session.add(user)
+            session.commit()
+
+        return user
