@@ -32,7 +32,6 @@ class Quiz(Base):
 class User(Base):
     __tablename__ = "users"
     id = sa.Column(sa.Integer, primary_key=True)
-    discord_id = sa.Column(sa.Integer, unique=True, nullable=False)
     name = sa.Column(sa.String, nullable=False)
 
 
