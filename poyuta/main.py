@@ -49,19 +49,6 @@ admin_user_ids = [
 # TODO : hide commands if user is not admin
 
 
-# Function to change the quiz audio and correct answer
-async def change_female(new_female_clip, new_correct_female):
-    global current_female_clip, correct_female
-    current_female_clip = new_female_clip
-    correct_female = new_correct_female
-
-
-async def change_male(new_male_clip, new_correct_male):
-    global current_male_clip, correct_male
-    current_male_clip = new_male_clip
-    correct_male = new_correct_male
-
-
 @bot.event
 async def on_ready():
     print(f"logged in as {bot.user.name}")
@@ -70,16 +57,6 @@ async def on_ready():
         print(f"synced {len(synced)} command(s)")
     except Exception as e:
         print(e)
-
-
-@bot.command()
-async def currentclips(ctx):
-    if current_female_clip:
-        await ctx.send(current_female_clip)
-    if current_male_clip:
-        await ctx.send(current_male_clip)
-    else:
-        await ctx.send("no clips in progress")
 
 
 @bot.tree.command(name="newquiz")
