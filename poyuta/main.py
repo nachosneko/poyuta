@@ -5,10 +5,14 @@ from datetime import datetime, timedelta
 # Discord
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
+
+import asyncio
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # Database
 from poyuta.database import User, Quiz, Answer, SessionFactory, initialize_database
+
 
 # Utils
 from poyuta.utils import (
@@ -63,6 +67,9 @@ async def on_ready():
         print(f"synced {len(synced)} command(s)")
     except Exception as e:
         print(e)
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(post_yesterdays_quiz_results, "cron", hour=18, minute=0, second=0)  # Schedule at 19:00:00
+    scheduler.start()
 
 
 @bot.tree.command(name="newquiz")
@@ -79,11 +86,11 @@ async def newquiz(
     new_male_clip: str,
     new_correct_male: str,
 ):
-    """Create a new quiz."""
+    """create a new quiz."""
 
     if not is_admin(interaction.user):
         await interaction.response.send_message(
-            "You are not an admin, you can't use this command"
+            "you are not an admin, you can't use this command"
         )
         return
 
@@ -120,13 +127,72 @@ async def newquiz(
         session.add(new_quiz)
         session.commit()
 
-    await interaction.response.send_message(f"New quiz created for {new_date}")
+    await interaction.response.send_message(f"new quiz created for {new_date}")
 
+@bot.event
+async def post_yesterdays_quiz_results():
+    channel_id = 366643056138518532  # Replace with the actual channel ID
+    channel = bot.get_channel(channel_id)
+
+    if not channel:
+        print("channel not found.")
+        return
+
+    # Calculate the date for yesterday
+    yesterday = datetime.now() - timedelta(days=1)
+
+    # Query the database for the quiz that matches the calculated date
+    with SessionFactory() as session:
+        quiz = session.query(Quiz).filter(Quiz.date == yesterday.date()).first()
+        answer = session.query(Answer).filter(Answer.user).first()
+
+    if not quiz:
+        print("quiz not found for yesterday.")
+        return
+
+    embed = discord.Embed(
+        title="Yesterday's Quiz Results",
+        color=0xbbe6f3,
+    )
+    embed.set_author(
+        name=config["NEWQUIZ_EMBED_AUTHOR"],
+        icon_url="https://i.imgur.com/6uKnKMS.png"
+    )
+
+    embed.add_field(name="Male", value=f"||{quiz.male_answer}||", inline=True)
+    embed.add_field(name="Clip", value=quiz.male_clip, inline=True)
+
+    embed.add_field(name="", value="", inline=False)
+
+    embed.add_field(name="Female", value=f"||{quiz.female_answer}||", inline=True)
+    embed.add_field(name="Clip", value=quiz.female_clip, inline=True)
+
+    embed.add_field(name="", value="", inline=False)
+
+    embed.add_field(
+        name="Top Guessers", 
+        value=f"\n{answer.user_id}\nValue 1 Line 2\nValue 1 Line 3", 
+        inline=True,
+    )
+
+    embed.add_field(name="Time(?)", value="TBA", inline=True)
+    embed.add_field(name="Attempts", value="TBA", inline=True)
+    embed.add_field(name="Most Guessed (Male)", value="TBA", inline=False)
+    embed.add_field(name="Most Guessed (Female)", value="TBA", inline=False)
+
+
+    await channel.send(embed=embed)
+
+
+@bot.command()
+async def postquizresults(ctx):
+    await post_yesterdays_quiz_results()
+    await ctx.send("(yesterdays quiz)")
 
 @bot.tree.command(name="female")
 @app_commands.describe(seiyuu="guess the female seiyuu")
 async def female(interaction: discord.Interaction, seiyuu: str):
-    """Guess the seiyuu for the current female clip."""
+    """guess the seiyuu for the current female clip."""
 
     quiz = get_current_quiz(bot.session)
 
@@ -155,7 +221,7 @@ async def female(interaction: discord.Interaction, seiyuu: str):
     if re.search(user_answer_pattern, quiz.female_answer):
         # Send feedback to the user
         await interaction.response.send_message(
-            ":fearful: you guessed it **correctly**"
+            "✅"
         )
 
         # Store the user's answer in the Answer table
@@ -167,7 +233,7 @@ async def female(interaction: discord.Interaction, seiyuu: str):
     # Otherwise, the pattern doesn't match : the answer is incorrect
     else:
         # Send feedback to the user
-        await interaction.response.send_message("**incorrect** :skull:")
+        await interaction.response.send_message("❌")
 
         # Store the user's answer in the Answer table
         with bot.session as session:
@@ -179,7 +245,7 @@ async def female(interaction: discord.Interaction, seiyuu: str):
 @bot.tree.command(name="male")
 @app_commands.describe(seiyuu="guess the male seiyuu")
 async def male(interaction: discord.Interaction, seiyuu: str):
-    """Guess the seiyuu for the current male clip."""
+    """guess the seiyuu for the current male clip."""
 
     quiz = get_current_quiz(bot.session)
 
@@ -208,7 +274,7 @@ async def male(interaction: discord.Interaction, seiyuu: str):
     if re.search(user_answer_pattern, quiz.male_answer):
         # Send feedback to the user
         await interaction.response.send_message(
-            ":fearful: you guessed it **correctly**"
+            "✅"
         )
 
         # Store the user's answer in the Answer table
@@ -220,7 +286,7 @@ async def male(interaction: discord.Interaction, seiyuu: str):
     # Otherwise, the pattern doesn't match : the answer is incorrect
     else:
         # Send feedback to the user
-        await interaction.response.send_message("**incorrect** :skull:")
+        await interaction.response.send_message("❌")
 
         # Store the user's answer in the Answer table
         with bot.session as session:
