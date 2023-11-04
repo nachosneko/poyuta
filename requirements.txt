@@ -1,4 +1,5 @@
 discord.py
 python-dotenv
 sqlalchemy
+apscheduler
 aiohttp==3.9.0b0 # for python > 3.12
