@@ -44,13 +44,16 @@ class User(Base):
 class Answer(Base):
     __tablename__ = "answers"
     id = sa.Column(sa.Integer, primary_key=True)
-    user_id = sa.Column(sa.Integer, sa.ForeignKey(User.id))
+
     quiz_id = sa.Column(sa.Integer, sa.ForeignKey(Quiz.id))
+    quiz = relationship(Quiz, backref="answers")
+
+    user_id = sa.Column(sa.Integer, sa.ForeignKey(User.id))
+    user = relationship(User, backref="answers")
+
     answer = sa.Column(sa.String, nullable=False)
     answer_type = sa.Column(sa.String, nullable=False)
     is_correct = sa.Column(sa.Boolean, nullable=False)
-    user = relationship(User, backref="user_answers")  # Use a unique name
-    quiz = relationship(Quiz, backref="answers")
 
 
 def initialize_database(default_admin_id, default_admin_name):

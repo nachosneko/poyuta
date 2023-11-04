@@ -5,9 +5,8 @@ from datetime import datetime, timedelta
 # Discord
 import discord
 from discord import app_commands
-from discord.ext import commands, tasks
+from discord.ext import commands
 
-import asyncio
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # Database
@@ -67,8 +66,11 @@ async def on_ready():
         print(f"synced {len(synced)} command(s)")
     except Exception as e:
         print(e)
+
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(post_yesterdays_quiz_results, "cron", hour=18, minute=0, second=0)  # Schedule at 19:00:00
+    scheduler.add_job(
+        post_yesterdays_quiz_results, "cron", hour=18, minute=0, second=0
+    )  # Schedule at 19:00:00
     scheduler.start()
 
 
@@ -86,7 +88,7 @@ async def newquiz(
     new_male_clip: str,
     new_correct_male: str,
 ):
-    """create a new quiz."""
+    """*Admin only* - create a new quiz."""
 
     if not is_admin(interaction.user):
         await interaction.response.send_message(
@@ -129,6 +131,97 @@ async def newquiz(
 
     await interaction.response.send_message(f"new quiz created for {new_date}")
 
+
+@bot.tree.command(name="updatequiz")
+@app_commands.describe(
+    date="date of the quiz to update in YYYY-MM-DD format",
+    new_female_clip="input new clip for female",
+    new_correct_female="input new seiyuu for female clip",
+    new_male_clip="input new clip for male",
+    new_correct_male="input new seiyuu for male clip",
+)
+async def updatequiz(
+    interaction: discord.Interaction,
+    date: str,
+    new_female_clip: str,
+    new_correct_female: str,
+    new_male_clip: str,
+    new_correct_male: str,
+):
+    """*Admin only* - Update a planned quiz."""
+
+    if not is_admin(interaction.user):
+        await interaction.response.send_message(
+            "You are not an admin, you can't use this command."
+        )
+        return
+
+    try:
+        date = datetime.strptime(date, "%Y-%m-%d").date()
+    except ValueError:
+        await interaction.response.send_message(
+            "Invalid date format. Please use YYYY-MM-DD."
+        )
+        return
+
+    # check the date is in the future
+    if date <= datetime.now().date():
+        await interaction.response.send_message(
+            "You can only update a quiz that hasn't happened yet. Please use a date in the future."
+        )
+        return
+
+    # check the quiz exists
+    with bot.session as session:
+        quiz = session.query(Quiz).filter(Quiz.date == date).first()
+
+        if not quiz:
+            await interaction.response.send_message("No quiz for this date.")
+            return
+
+        # Update attributes
+        quiz.female_clip = new_female_clip
+        quiz.female_answer = new_correct_female
+        quiz.male_clip = new_male_clip
+        quiz.male_answer = new_correct_male
+
+        # Commit the changes to the database
+        session.commit()
+
+        await interaction.response.send_message(f"Quiz updated for {date}")
+
+
+@bot.tree.command(name="plannedquizzes")
+@app_commands.describe()
+async def male(interaction: discord.Interaction):
+    """*Admin only* - Check the planned quizzes."""
+
+    if not is_admin(interaction.user):
+        await interaction.response.send_message(
+            "You are not an admin, you can't use this command"
+        )
+        return
+
+    today = datetime.now().date()
+
+    with bot.session as session:
+        quizzes = session.query(Quiz).filter(Quiz.date >= today).all()
+
+        if not quizzes:
+            await interaction.response.send_message("No planned quizzes")
+            return
+
+        planned_quizzes = "\n\n".join(
+            [
+                f"### {quiz.date} :\n \
+                - Female : {quiz.female_clip} {quiz.female_answer}\n \
+                - Male : {quiz.male_clip} {quiz.male_answer}"
+                for quiz in quizzes
+            ]
+        )
+        await interaction.response.send_message(planned_quizzes)
+
+
 @bot.event
 async def post_yesterdays_quiz_results():
     channel_id = 366643056138518532  # Replace with the actual channel ID
@@ -142,7 +235,7 @@ async def post_yesterdays_quiz_results():
     yesterday = datetime.now() - timedelta(days=1)
 
     # Query the database for the quiz that matches the calculated date
-    with SessionFactory() as session:
+    with bot.session as session:
         quiz = session.query(Quiz).filter(Quiz.date == yesterday.date()).first()
         answer = session.query(Answer).filter(Answer.user).first()
 
@@ -152,11 +245,10 @@ async def post_yesterdays_quiz_results():
 
     embed = discord.Embed(
         title="Yesterday's Quiz Results",
-        color=0xbbe6f3,
+        color=0xBBE6F3,
     )
     embed.set_author(
-        name=config["NEWQUIZ_EMBED_AUTHOR"],
-        icon_url="https://i.imgur.com/6uKnKMS.png"
+        name=config["NEWQUIZ_EMBED_AUTHOR"], icon_url="https://i.imgur.com/6uKnKMS.png"
     )
 
     embed.add_field(name="Male", value=f"||{quiz.male_answer}||", inline=True)
@@ -170,8 +262,8 @@ async def post_yesterdays_quiz_results():
     embed.add_field(name="", value="", inline=False)
 
     embed.add_field(
-        name="Top Guessers", 
-        value=f"\n{answer.user_id}\nValue 1 Line 2\nValue 1 Line 3", 
+        name="Top Guessers",
+        value=f"\n{answer.user_id}\nValue 1 Line 2\nValue 1 Line 3",
         inline=True,
     )
 
@@ -180,7 +272,6 @@ async def post_yesterdays_quiz_results():
     embed.add_field(name="Most Guessed (Male)", value="TBA", inline=False)
     embed.add_field(name="Most Guessed (Female)", value="TBA", inline=False)
 
-
     await channel.send(embed=embed)
 
 
@@ -188,6 +279,7 @@ async def post_yesterdays_quiz_results():
 async def postquizresults(ctx):
     await post_yesterdays_quiz_results()
     await ctx.send("(yesterdays quiz)")
+
 
 @bot.tree.command(name="female")
 @app_commands.describe(seiyuu="guess the female seiyuu")
@@ -220,9 +312,7 @@ async def female(interaction: discord.Interaction, seiyuu: str):
     # If the pattern matches : the answer is correct
     if re.search(user_answer_pattern, quiz.female_answer):
         # Send feedback to the user
-        await interaction.response.send_message(
-            "✅"
-        )
+        await interaction.response.send_message("✅")
 
         # Store the user's answer in the Answer table
         with bot.session as session:
@@ -273,9 +363,7 @@ async def male(interaction: discord.Interaction, seiyuu: str):
     # If the pattern matches : the answer is correct
     if re.search(user_answer_pattern, quiz.male_answer):
         # Send feedback to the user
-        await interaction.response.send_message(
-            "✅"
-        )
+        await interaction.response.send_message("✅")
 
         # Store the user's answer in the Answer table
         with bot.session as session:
