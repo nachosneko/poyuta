@@ -11,7 +11,7 @@ import random
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # Database
-from poyuta.database import User, Quiz, Answer, SessionFactory, initialize_database
+from poyuta.database import Interaction, User, Quiz, Answer, SessionFactory, initialize_database
 
 
 # Utils
@@ -45,7 +45,7 @@ class PoyutaBot(commands.Bot):
 
 
 # Instantiate your bot
-bot = PoyutaBot(command_prefix="!", intents=intents)
+bot = PoyutaBot(command_prefix="?", intents=intents)
 
 
 @bot.event
@@ -304,6 +304,28 @@ async def post_yesterdays_quiz_results():
     embed.add_field(name="Most Guessed (Female)", value="TBA", inline=False)
 
     await channel.send(embed=embed, view=view)
+
+@bot.event
+async def on_button_click(interaction: discord.Interaction):
+    # Check if it's a button interaction
+    if isinstance(interaction, discord.ui.Button):
+        # Get the user's ID and name
+        user_id = interaction.user.id
+        user_name = interaction.user.name
+
+        # Get the button label to determine the type of interaction
+        button_label = interaction.component.label
+
+        # Store the interaction in the database
+        with bot.session as session:
+            interaction_entry = Interaction(
+                user_id=user_id,
+                timestamp=datetime.now(),
+                button_label=button_label,
+                command_type=None  # You can set this to "male" or "female" based on the button label
+            )
+            session.add(interaction_entry)
+            session.commit()
 
 
 @bot.command()  # for quick debugging

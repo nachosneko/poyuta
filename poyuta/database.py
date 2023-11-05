@@ -55,11 +55,20 @@ class Answer(Base):
     answer_type = sa.Column(sa.String, nullable=False)
     is_correct = sa.Column(sa.Boolean, nullable=False)
 
+class Interaction(Base):
+    __tablename__ = "interactions"
+    id = sa.Column(sa.Integer, primary_key=True)
+    user_id = sa.Column(sa.Integer, sa.ForeignKey(User.id))
+    user = relationship(User, backref="interactions")
+    timestamp = sa.Column(sa.DateTime, nullable=False)
+    button_label = sa.Column(sa.String, nullable=False)
+    command_type = sa.Column(sa.String, nullable=False)  # "male" or "female" for example
+
 
 def initialize_database(default_admin_id, default_admin_name):
     inspector = inspect(engine)
 
-    if not inspector.has_table("users") or not inspector.has_table("quiz"):
+    if not inspector.has_table("users") or not inspector.has_table("quiz") or not inspector.has_table("interactions"):
         # Create the tables
         Base.metadata.create_all(bind=engine)
 
