@@ -3,7 +3,7 @@ from pathlib import Path
 
 # SQLAlchemy
 import sqlalchemy as sa
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 
@@ -25,11 +25,13 @@ SessionFactory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 class Quiz(Base):
     __tablename__ = "quiz"
     id = sa.Column(sa.Integer, primary_key=True)
-    female_answer = sa.Column(sa.String, nullable=False)
-    female_clip = sa.Column(sa.String, nullable=False)
-    male_answer = sa.Column(sa.String, nullable=False)
-    male_clip = sa.Column(sa.String, nullable=False)
     date = sa.Column(sa.Date, nullable=False)
+    clip = sa.Column(sa.String, nullable=False)
+    answer = sa.Column(sa.String, nullable=False)
+    type = sa.Column(sa.String, nullable=False)
+
+    # ensure there's only one type of quiz per day
+    __table_args__ = (UniqueConstraint("date", "type", name="uq_date_type"),)
 
 
 # Define the User class
@@ -40,7 +42,7 @@ class User(Base):
     is_admin = sa.Column(sa.Boolean, nullable=False, default=False)
 
 
-# Define the Answer class with a unique backref name
+# Define the Answer class
 class Answer(Base):
     __tablename__ = "answers"
     id = sa.Column(sa.Integer, primary_key=True)
@@ -52,8 +54,8 @@ class Answer(Base):
     user = relationship(User, backref="answers")
 
     answer = sa.Column(sa.String, nullable=False)
-    answer_type = sa.Column(sa.String, nullable=False)
     is_correct = sa.Column(sa.Boolean, nullable=False)
+
 
 class Interaction(Base):
     __tablename__ = "interactions"
@@ -62,13 +64,19 @@ class Interaction(Base):
     user = relationship(User, backref="interactions")
     timestamp = sa.Column(sa.DateTime, nullable=False)
     button_label = sa.Column(sa.String, nullable=False)
-    command_type = sa.Column(sa.String, nullable=False)  # "male" or "female" for example
+    command_type = sa.Column(
+        sa.String, nullable=False
+    )  # "male" or "female" for example
 
 
 def initialize_database(default_admin_id, default_admin_name):
     inspector = inspect(engine)
 
-    if not inspector.has_table("users") or not inspector.has_table("quiz") or not inspector.has_table("interactions"):
+    if (
+        not inspector.has_table("users")
+        or not inspector.has_table("quiz")
+        or not inspector.has_table("interactions")
+    ):
         # Create the tables
         Base.metadata.create_all(bind=engine)
 

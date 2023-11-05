@@ -11,21 +11,31 @@ import random
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # Database
-from poyuta.database import Interaction, User, Quiz, Answer, SessionFactory, initialize_database
+from poyuta.database import (
+    Interaction,
+    User,
+    Quiz,
+    Answer,
+    SessionFactory,
+    initialize_database,
+)
 
 
 # Utils
 from poyuta.utils import (
     load_environment,
     process_user_input,
-    get_current_quiz,
+    get_current_quiz_date,
+    get_current_quizzes,
     get_user_from_id,
     is_admin,
     generate_stats_embed_content,
 )
 
-
 config = load_environment()
+DAILY_QUIZ_RESET_TIME = datetime.strptime(
+    config["DAILY_QUIZ_RESET_TIME"], "%H:%M:%S"
+).time()
 
 intents = discord.Intents.all()
 intents.reactions = True
@@ -62,8 +72,12 @@ async def on_ready():
 
     scheduler = AsyncIOScheduler()
     scheduler.add_job(
-        post_yesterdays_quiz_results, "cron", hour=18, minute=0, second=0
-    )  # Schedule at 19:00:00
+        post_yesterdays_quiz_results,
+        "cron",
+        hour=DAILY_QUIZ_RESET_TIME.hour,
+        minute=DAILY_QUIZ_RESET_TIME.minute,
+        second=DAILY_QUIZ_RESET_TIME.second,
+    )
     scheduler.start()
 
 
@@ -93,26 +107,35 @@ async def newquiz(
         latest_quiz = session.query(Quiz).order_by(Quiz.date.desc()).first()
 
         # get current date
-        today = date.today()
+        current_quiz_date = get_current_quiz_date(
+            daily_quiz_reset_time=DAILY_QUIZ_RESET_TIME
+        )
 
         # if the latest quiz date is in the future
         # that means there's already a quiz for today, so add the new date to the planned quizzes
         # i.e latest quiz date + 1 day
-        if latest_quiz and latest_quiz.date >= today:
+        if latest_quiz and latest_quiz.date >= current_quiz_date:
             new_date = latest_quiz.date + timedelta(days=1)
         # else there aren't any quiz today, so the new date is today
         else:
-            new_date = today
+            new_date = current_quiz_date
 
-        # add the new quiz to database
-        new_quiz = Quiz(
-            female_clip=new_female_clip,
-            female_answer=new_correct_female,
-            male_clip=new_male_clip,
-            male_answer=new_correct_male,
+        # add the new quizzes to database
+        new_female_quiz = Quiz(
+            clip=new_female_clip,
+            answer=new_correct_female,
+            type="female_seiyuu",
             date=new_date,
         )
-        session.add(new_quiz)
+        session.add(new_female_quiz)
+
+        new_male_quiz = Quiz(
+            clip=new_male_clip,
+            answer=new_correct_male,
+            type="male_seiyuu",
+            date=new_date,
+        )
+        session.add(new_male_quiz)
         session.commit()
 
     await interaction.response.send_message(f"New quiz created on {new_date}.")
@@ -120,19 +143,17 @@ async def newquiz(
 
 @bot.tree.command(name="updatequiz")
 @app_commands.describe(
-    date="date of the quiz to update in YYYY-MM-DD format",
-    new_female_clip="input new clip for female",
-    new_correct_female="input new seiyuu for female clip",
-    new_male_clip="input new clip for male",
-    new_correct_male="input new seiyuu for male clip",
+    quiz_date="date of the quiz to update in YYYY-MM-DD format",
+    quiz_type="type of the quiz to update",
+    new_clip="input new clip for female",
+    new_answer="input new seiyuu for female clip",
 )
 async def updatequiz(
     interaction: discord.Interaction,
-    date: str,
-    new_female_clip: str,
-    new_correct_female: str,
-    new_male_clip: str,
-    new_correct_male: str,
+    quiz_date: str,
+    quiz_type: str,
+    new_clip: str,
+    new_answer: str,
 ):
     """*Admin only* - Update a planned quiz."""
 
@@ -144,7 +165,7 @@ async def updatequiz(
             return
 
         try:
-            date = datetime.strptime(date, "%Y-%m-%d").date()
+            quiz_date = datetime.strptime(quiz_date, "%Y-%m-%d").date()
         except ValueError:
             await interaction.response.send_message(
                 "Invalid date format. Please use YYYY-MM-DD."
@@ -152,29 +173,35 @@ async def updatequiz(
             return
 
         # check the date is in the future
-        if date <= date.today():
+        if quiz_date <= date.today():
             await interaction.response.send_message(
                 "You can only update a quiz that hasn't happened yet. Please use a date in the future."
             )
             return
 
-        # check the quiz exists
-        quiz = session.query(Quiz).filter(Quiz.date == date).first()
+        # check if that quiz exists for this quiz_type and quiz_date
+        quiz = (
+            session.query(Quiz)
+            .filter(Quiz.type == quiz_type, Quiz.date == quiz_date)
+            .first()
+        )
 
         if not quiz:
-            await interaction.response.send_message("No quiz for this date.")
+            await interaction.response.send_message(
+                f"No {quiz_type} quiz on {quiz_date}. Can't update it."
+            )
             return
 
         # Update attributes
-        quiz.female_clip = new_female_clip
-        quiz.female_answer = new_correct_female
-        quiz.male_clip = new_male_clip
-        quiz.male_answer = new_correct_male
+        quiz.clip = new_clip
+        quiz.answer = new_answer
 
         # Commit the changes to the database
         session.commit()
 
-        await interaction.response.send_message(f"Quiz updated for {date}.")
+        await interaction.response.send_message(
+            f"{quiz_type} quiz updated for {quiz_date}."
+        )
 
 
 @bot.tree.command(name="plannedquizzes")
@@ -188,36 +215,69 @@ async def male(interaction: discord.Interaction):
             )
             return
 
-        today = date.today()
+        current_quiz_date = get_current_quiz_date(
+            daily_quiz_reset_time=DAILY_QUIZ_RESET_TIME
+        )
 
-        # get all the quizzes that are planned for today or in the future
-        quizzes = session.query(Quiz).filter(Quiz.date >= today).all()
+        # get all the quizzes that are planned after the current quiz
+        unique_date = (
+            session.query(Quiz.date)
+            .filter(Quiz.date > current_quiz_date)
+            .distinct()
+            .all()
+        )
 
-        if not quizzes:
-            await interaction.response.send_message("No planned quizzes.")
+        if not unique_date:
+            await interaction.response.send_message(
+                f"No planned quizzes after {current_quiz_date}."
+            )
             return
 
         embed = discord.Embed(title="Planned Quizzes")
 
-        for quiz in quizzes:
+        for quiz_date in unique_date:
+            quiz_date = quiz_date[0]
+
             embed.add_field(
-                name=f":calendar_spiral: __**{quiz.date}**__", value="", inline=False
+                name=f":calendar_spiral: __**{quiz_date}**__", value="", inline=False
             )
 
+            # get female quiz for this date
+            quiz = (
+                session.query(Quiz)
+                .filter(Quiz.type == "female_seiyuu", Quiz.date == quiz_date)
+                .first()
+            )
+            value = (
+                f"[{quiz.answer}]({quiz.clip})"
+                if quiz
+                else "Nothing planned :disappointed_relieved:"
+            )
             embed.add_field(
                 name=":female_sign: Female",
-                value=f"[{quiz.female_answer}]({quiz.female_clip})",
+                value=value,
                 inline=True,
             )
 
+            # get male quiz for this date
+            quiz = (
+                session.query(Quiz)
+                .filter(Quiz.type == "male_seiyuu", Quiz.date == quiz_date)
+                .first()
+            )
+            value = (
+                f"[{quiz.answer}]({quiz.clip})"
+                if quiz
+                else "Nothing planned :disappointed_relieved:"
+            )
             embed.add_field(
                 name=":male_sign: Male",
-                value=f"[{quiz.male_answer}]({quiz.male_clip})",
+                value=f"[{quiz.answer}]({quiz.clip})",
                 inline=True,
             )
 
-            # Linebreak unless last quiz
-            if quiz != quizzes[-1]:
+            # Linebreak unless last date
+            if quiz_date != unique_date[-1][0]:
                 embed.add_field(name="\u200b", value="", inline=False)
 
         await interaction.response.send_message(embed=embed)
@@ -229,23 +289,40 @@ class newquizbutton(discord.ui.View):
         self.value = None
 
     @discord.ui.button(label="Guess Male", style=discord.ButtonStyle.green)
-    async def postquizresults1(
+    async def display_male_quiz_button(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
         with bot.session as session:
-            quiz = get_current_quiz(session=session)
+            current_quiz_date = get_current_quiz_date(
+                daily_quiz_reset_time=DAILY_QUIZ_RESET_TIME
+            )
+            # get male quiz
+            current_male_quiz = (
+                session.query(Quiz)
+                .filter(Quiz.type == "male_seiyuu", Quiz.date == current_quiz_date)
+                .first()
+            )
+
         await interaction.response.send_message(
-            f"**male clip:** {quiz.male_clip}", ephemeral=True
+            f"**male clip:** {current_male_quiz.clip}", ephemeral=True
         )
 
     @discord.ui.button(label="Guess Female", style=discord.ButtonStyle.green)
-    async def postquizresults2(
+    async def display_female_quiz_button(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
         with bot.session as session:
-            quiz = get_current_quiz(session=session)
+            current_quiz_date = get_current_quiz_date(
+                daily_quiz_reset_time=DAILY_QUIZ_RESET_TIME
+            )
+            # get female quiz
+            current_female_quiz = (
+                session.query(Quiz)
+                .filter(Quiz.type == "female_seiyuu", Quiz.date == current_quiz_date)
+                .first()
+            )
         await interaction.response.send_message(
-            f"**female clip:** {quiz.female_clip}", ephemeral=True
+            f"**female clip:** {current_female_quiz.clip}", ephemeral=True
         )
 
 
@@ -254,56 +331,76 @@ async def post_yesterdays_quiz_results():
     channel_id = int(config["CHANNEL_ID"])  # Replace with the actual channel ID
     channel = bot.get_channel(channel_id)
 
+    display_new_quiz_buttons = newquizbutton()
+
     if not channel:
         print("Invalid channel ID.")
         # await channel.send("Invalid channel ID.")
         return
 
     # Calculate the date for yesterday
-    yesterday = date.today() - timedelta(days=1)
+    yesterday = get_current_quiz_date(DAILY_QUIZ_RESET_TIME) - timedelta(days=1)
 
     # Query the database for the quiz that matches the calculated date
     with bot.session as session:
+        # check there are quizzes for yesterday
         quiz = session.query(Quiz).filter(Quiz.date == yesterday).first()
-        answer = session.query(Answer).filter(Answer.user).first()
+        if not quiz:
+            embed = discord.Embed(title="There were no quizzes yesterday.")
+            await channel.send(embed=embed, view=display_new_quiz_buttons)
+            return
 
-    view = newquizbutton()
+        embed = discord.Embed(
+            title="Yesterday's Quiz Results",
+            color=0xBBE6F3,
+        )
+        embed.set_author(
+            name=config["NEWQUIZ_EMBED_AUTHOR"], icon_url=config["AUTHOR_ICON_URL"]
+        )
 
-    if not quiz:
-        embed = discord.Embed(title="There were no quizzes yesterday.")
-        await channel.send(embed=embed, view=view)
-        return
+        # get yesterday's male quiz
+        yesterday_male_quiz = (
+            session.query(Quiz)
+            .filter(Quiz.type == "male_seiyuu", Quiz.date == yesterday)
+            .first()
+        )
+        embed.add_field(
+            name="Male", value=f"||{yesterday_male_quiz.answer}||", inline=True
+        )
+        embed.add_field(name="Clip", value=yesterday_male_quiz.clip, inline=True)
 
-    embed = discord.Embed(
-        title="Yesterday's Quiz Results",
-        color=0xBBE6F3,
-    )
-    embed.set_author(
-        name=config["NEWQUIZ_EMBED_AUTHOR"], icon_url=config["AUTHOR_ICON_URL"]
-    )
+        # Linebreak
+        embed.add_field(name="", value="", inline=False)
 
-    embed.add_field(name="Male", value=f"||{quiz.male_answer}||", inline=True)
-    embed.add_field(name="Clip", value=quiz.male_clip, inline=True)
+        # get yesterday's female quiz
+        yesterday_female_quiz = (
+            session.query(Quiz)
+            .filter(Quiz.type == "female_seiyuu", Quiz.date == yesterday)
+            .first()
+        )
+        embed.add_field(
+            name="Female", value=f"||{yesterday_female_quiz.answer}||", inline=True
+        )
+        embed.add_field(name="Clip", value=yesterday_female_quiz.clip, inline=True)
 
-    embed.add_field(name="", value="", inline=False)
+        # Linebreak
+        embed.add_field(name="", value="", inline=False)
 
-    embed.add_field(name="Female", value=f"||{quiz.female_answer}||", inline=True)
-    embed.add_field(name="Clip", value=quiz.female_clip, inline=True)
+        # Top Guesseres TODO
+        embed.add_field(
+            name="Top Guessers",
+            value=f"\nTODO\nValue 1 Line 2\nValue 1 Line 3",
+            inline=True,
+        )
 
-    embed.add_field(name="", value="", inline=False)
+        # TODO
+        embed.add_field(name="Time(?)", value="TBA", inline=True)
+        embed.add_field(name="Attempts", value="TBA", inline=True)
+        embed.add_field(name="Most Guessed (Male)", value="TBA", inline=False)
+        embed.add_field(name="Most Guessed (Female)", value="TBA", inline=False)
 
-    embed.add_field(
-        name="Top Guessers",
-        value=f"\n{answer.user_id}\nValue 1 Line 2\nValue 1 Line 3",
-        inline=True,
-    )
+    await channel.send(embed=embed, view=display_new_quiz_buttons)
 
-    embed.add_field(name="Time(?)", value="TBA", inline=True)
-    embed.add_field(name="Attempts", value="TBA", inline=True)
-    embed.add_field(name="Most Guessed (Male)", value="TBA", inline=False)
-    embed.add_field(name="Most Guessed (Female)", value="TBA", inline=False)
-
-    await channel.send(embed=embed, view=view)
 
 @bot.event
 async def on_button_click(interaction: discord.Interaction):
@@ -322,7 +419,7 @@ async def on_button_click(interaction: discord.Interaction):
                 user_id=user_id,
                 timestamp=datetime.now(),
                 button_label=button_label,
-                command_type=None  # You can set this to "male" or "female" based on the button label
+                command_type=None,  # You can set this to "male" or "female" based on the button label
             )
             session.add(interaction_entry)
             session.commit()
@@ -333,17 +430,27 @@ async def postquizresults(ctx):
     await post_yesterdays_quiz_results()
 
 
-@bot.tree.command(name="female")
+@bot.tree.command(name="female_seiyuu")
 @app_commands.describe(seiyuu="guess the female seiyuu")
-async def female(interaction: discord.Interaction, seiyuu: str):
+async def female_seiyuu(interaction: discord.Interaction, seiyuu: str):
     """guess the seiyuu for the current female clip."""
 
-    with bot.session as session:
-        quiz = get_current_quiz(session=session)
+    quiz_type = "female_seiyuu"
 
+    with bot.session as session:
+        current_quiz_date = get_current_quiz_date(
+            daily_quiz_reset_time=DAILY_QUIZ_RESET_TIME
+        )
+
+        # get female quiz for this date
+        quiz = (
+            session.query(Quiz)
+            .filter(Quiz.type == quiz_type, Quiz.date == current_quiz_date)
+            .first()
+        )
         if not quiz:
             await interaction.response.send_message(
-                "No quiz today :disappointed_relieved:"
+                f"No {quiz_type} quiz today :disappointed_relieved:"
             )
 
         user = get_user_from_id(
@@ -358,17 +465,12 @@ async def female(interaction: discord.Interaction, seiyuu: str):
         for answer in user.answers:
             if answer.quiz_id == quiz.id and answer.is_correct:
                 await interaction.response.send_message(
-                    "You have already answered correctly for this quiz."
+                    f"You have already answered correctly for today's {quiz_type} quiz."
                 )
                 return
 
     # create the answer object
-    user_answer = Answer(
-        user_id=user.id,
-        quiz_id=quiz.id,
-        answer=seiyuu,
-        answer_type="female",
-    )
+    user_answer = Answer(user_id=user.id, quiz_id=quiz.id, answer=seiyuu)
 
     # Generate a pattern to match with the correct answer
     user_answer_pattern = process_user_input(
@@ -376,7 +478,7 @@ async def female(interaction: discord.Interaction, seiyuu: str):
     )
 
     # If the pattern matches : the answer is correct
-    if re.search(user_answer_pattern, quiz.female_answer):
+    if re.search(user_answer_pattern, quiz.answer):
         # Send feedback to the user
         await interaction.response.send_message("✅")
 
@@ -398,17 +500,27 @@ async def female(interaction: discord.Interaction, seiyuu: str):
             session.commit()
 
 
-@bot.tree.command(name="male")
+@bot.tree.command(name="male_seiyuu")
 @app_commands.describe(seiyuu="guess the male seiyuu")
-async def male(interaction: discord.Interaction, seiyuu: str):
+async def male_seiyuu(interaction: discord.Interaction, seiyuu: str):
     """guess the seiyuu for the current male clip."""
 
-    with bot.session as session:
-        quiz = get_current_quiz(session=session)
+    quiz_type = "male_seiyuu"
 
+    with bot.session as session:
+        current_quiz_date = get_current_quiz_date(
+            daily_quiz_reset_time=DAILY_QUIZ_RESET_TIME
+        )
+
+        # get male quiz for this date
+        quiz = (
+            session.query(Quiz)
+            .filter(Quiz.type == quiz_type, Quiz.date == current_quiz_date)
+            .first()
+        )
         if not quiz:
             await interaction.response.send_message(
-                "No quiz today :disappointed_relieved:"
+                f"No {quiz_type} quiz today :disappointed_relieved:"
             )
 
         user = get_user_from_id(
@@ -423,17 +535,12 @@ async def male(interaction: discord.Interaction, seiyuu: str):
         for answer in user.answers:
             if answer.quiz_id == quiz.id and answer.is_correct:
                 await interaction.response.send_message(
-                    "You have already answered correctly for this quiz."
+                    f"You have already answered correctly for this today's {quiz_type} quiz."
                 )
                 return
 
     # create the answer object
-    user_answer = Answer(
-        user_id=user.id,
-        quiz_id=quiz.id,
-        answer=seiyuu,
-        answer_type="male",
-    )
+    user_answer = Answer(user_id=user.id, quiz_id=quiz.id, answer=seiyuu)
 
     # Generate a pattern to match with the correct answer
     user_answer_pattern = process_user_input(
@@ -441,7 +548,7 @@ async def male(interaction: discord.Interaction, seiyuu: str):
     )
 
     # If the pattern matches : the answer is correct
-    if re.search(user_answer_pattern, quiz.male_answer):
+    if re.search(user_answer_pattern, quiz.answer):
         # Send feedback to the user
         await interaction.response.send_message("✅")
 
@@ -480,11 +587,11 @@ async def mystats(interaction: discord.Interaction):
             return
 
         male_answers = [
-            answer for answer in user.answers if answer.answer_type == "male"
+            answer for answer in user.answers if answer.quiz.type == "male_seiyuu"
         ]
 
         female_answers = [
-            answer for answer in user.answers if answer.answer_type == "female"
+            answer for answer in user.answers if answer.quiz.type == "female_seiyuu"
         ]
 
         embed = discord.Embed(title="")
