@@ -5,7 +5,7 @@ Utility functions for the bot.
 # Standard library imports
 import os
 import re
-from datetime import datetime
+from datetime import date
 
 # Third party imports
 from dotenv import dotenv_values
@@ -14,7 +14,9 @@ from dotenv import dotenv_values
 from poyuta.database import Quiz, Answer, User
 
 # Typing helpers
+
 from sqlalchemy.orm.session import Session
+from discord import Embed
 
 # Define a list of replacement rules
 ANIME_REGEX_REPLACE_RULES = [
@@ -192,47 +194,185 @@ def process_user_input(
     return output_str
 
 
-def get_current_quiz(bot_session):
-    """Get the current quiz from the database."""
+def is_admin(session: Session, user: User):
+    """Check if a user is an admin.
 
-    with bot_session as session:
-        # get today's date
-        today = datetime.now().date()
+    Parameters
+    ----------
+    session : Session
+        Database session.
 
-        # get today's quiz
+    user : User
+        User to check.
+
+    Returns
+    -------
+    bool
+        Whether the user is an admin or not.
+    """
+
+    admins = session.query(User).filter(User.is_admin == True).all()
+
+    if user.id in [admin.id for admin in admins]:
+        return True
+    else:
+        return False
+
+
+def generate_stats_embed_content(session: Session, embed: Embed, answers: list[Answer]):
+    """Generate the stats embed content.
+
+    Parameters
+    ----------
+    session : Session
+        Database session.
+
+    embed : Embed
+        Embed to fill.
+
+    answers : list[Answer]
+        List of answers to process.
+
+    Returns
+    -------
+    Embed
+        Filled embed.
+    """
+    # Number of attempts
+    embed.add_field(name="Attempts", value=len(answers), inline=True)
+
+    # Average number of attempts per quiz
+    unique_quizzes = set([answer.quiz_id for answer in answers])
+    average_attempts = round(len(answers) / len(unique_quizzes), 2)
+    embed.add_field(
+        name="Average Attempts", value=f"{average_attempts} attempt(s)", inline=True
+    )
+
+    # Linebreak
+    embed.add_field(name="", value="", inline=False)
+
+    # Guess Rates
+    nb_correct_answers = len([answer for answer in answers if answer.is_correct])
+    guess_rate = round(nb_correct_answers / len(answers) * 100, 2)
+    embed.add_field(
+        name="Guess Rate",
+        value=f"{guess_rate}% ({nb_correct_answers}/{len(answers)})",
+        inline=True,
+    )
+
+    # Average Guess Time
+    # TODO retrieve from database once implemented
+    # Hard coded for now for testing purposes
+    embed.add_field(name="Average Guess Time", value="N/A", inline=True)
+
+    embed.add_field(name="", value="", inline=False)
+
+    # Fastest Guesses
+    # TODO retrieve from database once implemented
+    # Hard coded for now for testing purposes
+    fastest_guesses = [
+        {
+            "date": "2023-11-05",
+            "guess_time": "N/A",
+            "attempts": 1,
+        },
+        {
+            "date": "2023-10-25",
+            "guess_time": "N/A",
+            "attempts": "N/A",
+        },
+        {
+            "date": "2023-09-20",
+            "guess_time": "N/A",
+            "attempts": "N/A",
+        },
+    ]
+    fastest_guesses = "\n".join(
+        [
+            f"{guess['date']} : **{guess['guess_time']}s** ({guess['attempts']} attempts)"
+            for guess in fastest_guesses
+        ]
+    )
+
+    embed.add_field(
+        name="Fastest guesses",
+        value=fastest_guesses,
+        inline=True,
+    )
+
+    return embed
+
+
+def get_current_quiz(session: Session) -> Quiz | None:
+    """Get the current quiz from the database.
+
+    Parameters
+    ----------
+    session : Session
+        Database session.
+
+    Returns
+    -------
+    Quiz
+        Today quiz or last quiz if there are no quizzes planned today.
+    """
+
+    # get today's date
+    today = date.today()
+
+    # get today's quiz
+    quiz = (
+        session.query(Quiz).filter(Quiz.date == today).order_by(Quiz.id.desc()).first()
+    )
+
+    # if no quiz today, backup with latest quiz before today
+    if not quiz:
         quiz = (
             session.query(Quiz)
-            .filter(Quiz.date == today)
+            .filter(Quiz.date < today)
             .order_by(Quiz.id.desc())
             .first()
         )
 
-        # if no quiz today, backup with latest quiz before today
-        if not quiz:
-            quiz = (
-                session.query(Quiz)
-                .filter(Quiz.date < today)
-                .order_by(Quiz.id.desc())
-                .first()
-            )
-
-        return quiz
+    return quiz
 
 
 def get_user_from_id(
-    bot_session: Session,
+    session: Session,
     user_id: int,
-    user_name: str,
     add_if_not_exist: bool = True,
+    user_name: str = None,
 ):
-    """Get the user from the database."""
+    """Get the user from the database from its discord ID.
 
-    with bot_session as session:
-        user = session.query(User).filter(User.id == user_id).first()
+    Parameters
+    ----------
+    session : Session
+        Database session.
 
-        if not user and add_if_not_exist:
-            user = User(id=user_id, name=user_name, is_admin=False)
-            session.add(user)
-            session.commit()
+    user_id : int
+        User discord ID.
 
-        return user
+    add_if_not_exist : bool, optional
+        Whether to add the user to the database if it doesn't exist, by default True.
+
+    user_name : str
+        User name if the user is added to the database.
+
+    Returns
+    -------
+    User
+        User from the database.
+    """
+
+    user = session.query(User).filter(User.id == user_id).first()
+
+    if not user and add_if_not_exist:
+        if not user_name:
+            raise ValueError("user_name must be provided if add_if_not_exist is True")
+
+        user = User(id=user_id, name=user_name, is_admin=False)
+        session.add(user)
+        session.commit()
+
+    return user

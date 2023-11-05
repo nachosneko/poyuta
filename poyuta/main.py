@@ -1,6 +1,6 @@
 # Standard libraries
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, date, timedelta
 
 # Discord
 import discord
@@ -19,6 +19,8 @@ from poyuta.utils import (
     process_user_input,
     get_current_quiz,
     get_user_from_id,
+    is_admin,
+    generate_stats_embed_content,
 )
 
 
@@ -27,16 +29,6 @@ config = load_environment()
 intents = discord.Intents.all()
 intents.reactions = True
 intents.messages = True
-
-
-def is_admin(user):
-    with bot.session as session:
-        admins = session.query(User).filter(User.is_admin == True).all()
-
-    if user.id in [admin.id for admin in admins]:
-        return True
-    else:
-        return False
 
 
 # Update your bot class to include the session property
@@ -90,35 +82,28 @@ async def newquiz(
 ):
     """*Admin only* - create a new quiz."""
 
-    if not is_admin(interaction.user):
-        await interaction.response.send_message(
-            "you are not an admin, you can't use this command"
-        )
-        return
-
-    # get latest quiz from database
     with bot.session as session:
+        if not is_admin(session=session, user=interaction.user):
+            await interaction.response.send_message(
+                "you are not an admin, you can't use this command"
+            )
+            return
+
         latest_quiz = session.query(Quiz).order_by(Quiz.date.desc()).first()
-        # latest quiz date is the date of the latest quiz if it exists, else it defaults to yesterday
-        if latest_quiz:
-            latest_quiz_date = latest_quiz.date
+
+        # get current date
+        today = date.today()
+
+        # if the latest quiz date is in the future
+        # that means there's already a quiz for today, so add the new date to the planned quizzes
+        # i.e latest quiz date + 1 day
+        if latest_quiz and latest_quiz.date > today:
+            new_date = latest_quiz.date + timedelta(days=1)
+        # else there aren't any quiz today, so the new date is today
         else:
-            latest_quiz_date = datetime.now() - timedelta(days=1)
-            latest_quiz_date = latest_quiz_date.date()
+            new_date = today
 
-    # get current date
-    current_date = datetime.now().date()
-
-    # if the current date is before the latest quiz date
-    # that means there's already a quiz for today, so set the new date to the latest quiz date + 1 day
-    if current_date <= latest_quiz_date:
-        new_date = latest_quiz_date + timedelta(days=1)
-    # else set the new date to the current date
-    else:
-        new_date = current_date
-
-    # add the new quiz to database
-    with bot.session as session:
+        # add the new quiz to database
         new_quiz = Quiz(
             female_clip=new_female_clip,
             female_answer=new_correct_female,
@@ -150,29 +135,29 @@ async def updatequiz(
 ):
     """*Admin only* - Update a planned quiz."""
 
-    if not is_admin(interaction.user):
-        await interaction.response.send_message(
-            "You are not an admin, you can't use this command."
-        )
-        return
-
-    try:
-        date = datetime.strptime(date, "%Y-%m-%d").date()
-    except ValueError:
-        await interaction.response.send_message(
-            "Invalid date format. Please use YYYY-MM-DD."
-        )
-        return
-
-    # check the date is in the future
-    if date <= datetime.now().date():
-        await interaction.response.send_message(
-            "You can only update a quiz that hasn't happened yet. Please use a date in the future."
-        )
-        return
-
-    # check the quiz exists
     with bot.session as session:
+        if not is_admin(session=session, user=interaction.user):
+            await interaction.response.send_message(
+                "You are not an admin, you can't use this command."
+            )
+            return
+
+        try:
+            date = datetime.strptime(date, "%Y-%m-%d").date()
+        except ValueError:
+            await interaction.response.send_message(
+                "Invalid date format. Please use YYYY-MM-DD."
+            )
+            return
+
+        # check the date is in the future
+        if date <= date.today():
+            await interaction.response.send_message(
+                "You can only update a quiz that hasn't happened yet. Please use a date in the future."
+            )
+            return
+
+        # check the quiz exists
         quiz = session.query(Quiz).filter(Quiz.date == date).first()
 
         if not quiz:
@@ -192,25 +177,26 @@ async def updatequiz(
 
 
 @bot.tree.command(name="plannedquizzes")
-@app_commands.describe()
 async def male(interaction: discord.Interaction):
     """*Admin only* - Check the planned quizzes."""
 
-    if not is_admin(interaction.user):
-        await interaction.response.send_message(
-            "You are not an admin, you can't use this command"
-        )
-        return
-
-    today = datetime.now().date()
-
     with bot.session as session:
+        if not is_admin(session=session, user=interaction.user):
+            await interaction.response.send_message(
+                "You are not an admin, you can't use this command"
+            )
+            return
+
+        today = date.today()
+
+        # get all the quizzes that are planned for today or in the future
         quizzes = session.query(Quiz).filter(Quiz.date >= today).all()
 
         if not quizzes:
             await interaction.response.send_message("No planned quizzes")
             return
 
+        # format the answer
         planned_quizzes = "\n\n".join(
             [
                 f"### {quiz.date} :\n \
@@ -232,11 +218,11 @@ async def post_yesterdays_quiz_results():
         return
 
     # Calculate the date for yesterday
-    yesterday = datetime.now() - timedelta(days=1)
+    yesterday = date.today() - timedelta(days=1)
 
     # Query the database for the quiz that matches the calculated date
     with bot.session as session:
-        quiz = session.query(Quiz).filter(Quiz.date == yesterday.date()).first()
+        quiz = session.query(Quiz).filter(Quiz.date == yesterday).first()
         answer = session.query(Answer).filter(Answer.user).first()
 
     if not quiz:
@@ -286,17 +272,18 @@ async def postquizresults(ctx):
 async def female(interaction: discord.Interaction, seiyuu: str):
     """guess the seiyuu for the current female clip."""
 
-    quiz = get_current_quiz(bot.session)
+    with bot.session as session:
+        quiz = get_current_quiz(session=session)
 
-    if not quiz:
-        await interaction.response.send_message("no quiz today :(")
+        if not quiz:
+            await interaction.response.send_message("no quiz today :(")
 
-    user = get_user_from_id(
-        bot_session=bot.session,
-        user_id=interaction.user.id,
-        user_name=interaction.user.name,
-        add_if_not_exist=True,
-    )
+        user = get_user_from_id(
+            session=session,
+            user_id=interaction.user.id,
+            add_if_not_exist=True,
+            user_name=interaction.user.name,
+        )
 
     # create the answer object
     user_answer = Answer(
@@ -307,7 +294,9 @@ async def female(interaction: discord.Interaction, seiyuu: str):
     )
 
     # Generate a pattern to match with the correct answer
-    user_answer_pattern = process_user_input(seiyuu)
+    user_answer_pattern = process_user_input(
+        seiyuu, partial_match=False, swap_words=True
+    )
 
     # If the pattern matches : the answer is correct
     if re.search(user_answer_pattern, quiz.female_answer):
@@ -337,17 +326,18 @@ async def female(interaction: discord.Interaction, seiyuu: str):
 async def male(interaction: discord.Interaction, seiyuu: str):
     """guess the seiyuu for the current male clip."""
 
-    quiz = get_current_quiz(bot.session)
+    with bot.session as session:
+        quiz = get_current_quiz(session=session)
 
-    if not quiz:
-        await interaction.response.send_message("no quiz today :(")
+        if not quiz:
+            await interaction.response.send_message("no quiz today :(")
 
-    user = get_user_from_id(
-        bot_session=bot.session,
-        user_id=interaction.user.id,
-        user_name=interaction.user.name,
-        add_if_not_exist=True,
-    )
+        user = get_user_from_id(
+            session=session,
+            user_id=interaction.user.id,
+            add_if_not_exist=True,
+            user_name=interaction.user.name,
+        )
 
     # create the answer object
     user_answer = Answer(
@@ -358,7 +348,9 @@ async def male(interaction: discord.Interaction, seiyuu: str):
     )
 
     # Generate a pattern to match with the correct answer
-    user_answer_pattern = process_user_input(seiyuu)
+    user_answer_pattern = process_user_input(
+        seiyuu, partial_match=False, swap_words=True
+    )
 
     # If the pattern matches : the answer is correct
     if re.search(user_answer_pattern, quiz.male_answer):
@@ -381,3 +373,54 @@ async def male(interaction: discord.Interaction, seiyuu: str):
             user_answer.is_correct = False
             session.add(user_answer)
             session.commit()
+
+
+@bot.tree.command(name="mystats")
+async def mystats(interaction: discord.Interaction):
+    """get your stats."""
+
+    with bot.session as session:
+        # get the user
+        user = get_user_from_id(
+            session=session,
+            user_id=interaction.user.id,
+            add_if_not_exist=False,
+        )
+
+        if not user:
+            await interaction.response.send_message("you have not played yet")
+            return
+
+        male_answers = [
+            answer for answer in user.answers if answer.answer_type == "male"
+        ]
+
+        female_answers = [
+            answer for answer in user.answers if answer.answer_type == "female"
+        ]
+
+        embed = discord.Embed(
+            title=f"{user.name}'s Stats",
+            color=0xBBE6F3,
+        )
+
+        # Get the user's avatar URL
+        avatar_url = interaction.user.avatar.url
+        embed.set_author(name=interaction.user.name, icon_url=avatar_url)
+
+        # Male Stats
+        embed.add_field(name="Male Stats", value="", inline=False)
+        embed = generate_stats_embed_content(
+            session=session, embed=embed, answers=male_answers
+        )
+
+        # Linebreak
+        embed.add_field(name="\u200b", value="", inline=False)
+
+        # Female Stats
+        embed.add_field(name="Female Stats", value="", inline=False)
+        embed = generate_stats_embed_content(
+            session=session, embed=embed, answers=female_answers
+        )
+
+    await interaction.response.send_message(embed=embed)
