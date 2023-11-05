@@ -243,9 +243,9 @@ def generate_stats_embed_content(session: Session, embed: Embed, answers: list[A
 
     # Average number of attempts per quiz
     unique_quizzes = set([answer.quiz_id for answer in answers])
-    average_attempts = len(answers) / len(unique_quizzes)
+    average_attempts = round(len(answers) / len(unique_quizzes), 2)
     embed.add_field(
-        name="Average Attempts", value=f"{average_attempts} attempt(s)", inline=False
+        name="Average Attempts", value=f"{average_attempts} attempt(s)", inline=True
     )
 
     # Linebreak
