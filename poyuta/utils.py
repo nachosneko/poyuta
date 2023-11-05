@@ -5,7 +5,7 @@ Utility functions for the bot.
 # Standard library imports
 import os
 import re
-from datetime import date
+from datetime import datetime, date, time, timedelta
 
 # Third party imports
 from dotenv import dotenv_values
@@ -317,7 +317,37 @@ def generate_stats_embed_content(session: Session, embed: Embed, answers: list[A
     return embed
 
 
-def get_current_quiz(session: Session) -> Quiz | None:
+def get_current_quiz_date(daily_quiz_reset_time: time) -> date:
+    """Get the current quiz date.
+    The current quiz date is yesterday if it's before the daily quiz reset time,
+    else it's today.
+
+    Parameters
+    ----------
+    daily_quiz_reset_time : time
+        Time at which the daily quiz resets. HH:MM:SS format.
+
+    Returns
+    -------
+    date
+        Current quiz date.
+    """
+
+    # get time now
+    now = datetime.now()
+
+    # today's quiz is yesterday date if it's before the daily quiz reset time
+    # else it's today's date
+    return (
+        now.date()
+        if now.time() >= daily_quiz_reset_time
+        else now.date() - timedelta(days=1)
+    )
+
+
+def get_current_quizzes(
+    session: Session, daily_quiz_reset_time: time
+) -> list[Quiz] | None:
     """Get the current quiz from the database.
 
     Parameters
@@ -325,30 +355,40 @@ def get_current_quiz(session: Session) -> Quiz | None:
     session : Session
         Database session.
 
+    daily_quiz_reset_time : time
+        Time at which the daily quiz resets. HH:MM:SS format.
+
     Returns
     -------
     Quiz
-        Today quiz or last quiz if there are no quizzes planned today.
+        Today quizzes or last quizzes if there are no quizzes planned today.
     """
 
     # get today's date
-    today = date.today()
+    today = get_current_quiz_date(daily_quiz_reset_time)
 
-    # get today's quiz
-    quiz = (
-        session.query(Quiz).filter(Quiz.date == today).order_by(Quiz.id.desc()).first()
+    # get today's quizzes
+    quizzes = (
+        session.query(Quiz).filter(Quiz.date == today).order_by(Quiz.id.desc()).all()
     )
 
-    # if no quiz today, backup with latest quiz before today
-    if not quiz:
-        quiz = (
-            session.query(Quiz)
+    # if no quiz today, backup with most recent quizzes before today
+    if not quizzes:
+        unique_date = (
+            session.query(Quiz.date)
             .filter(Quiz.date < today)
-            .order_by(Quiz.id.desc())
+            .order_by(Quiz.date.desc())
             .first()
         )
+        if unique_date:
+            quizzes = (
+                session.query(Quiz)
+                .filter(Quiz.date == unique_date[0])
+                .order_by(Quiz.id.desc())
+                .all()
+            )
 
-    return quiz
+    return quizzes
 
 
 def get_user_from_id(
