@@ -86,7 +86,7 @@ async def newquiz(
     with bot.session as session:
         if not is_admin(session=session, user=interaction.user):
             await interaction.response.send_message(
-                "you are not an admin, you can't use this command"
+                "You are not an admin, you can't use this command."
             )
             return
 
@@ -98,7 +98,7 @@ async def newquiz(
         # if the latest quiz date is in the future
         # that means there's already a quiz for today, so add the new date to the planned quizzes
         # i.e latest quiz date + 1 day
-        if latest_quiz and latest_quiz.date > today:
+        if latest_quiz and latest_quiz.date >= today:
             new_date = latest_quiz.date + timedelta(days=1)
         # else there aren't any quiz today, so the new date is today
         else:
@@ -115,7 +115,7 @@ async def newquiz(
         session.add(new_quiz)
         session.commit()
 
-    await interaction.response.send_message(f"new quiz created for {new_date}")
+    await interaction.response.send_message(f"New quiz created on {new_date}.")
 
 
 @bot.tree.command(name="updatequiz")
@@ -174,7 +174,7 @@ async def updatequiz(
         # Commit the changes to the database
         session.commit()
 
-        await interaction.response.send_message(f"Quiz updated for {date}")
+        await interaction.response.send_message(f"Quiz updated for {date}.")
 
 
 @bot.tree.command(name="plannedquizzes")
@@ -184,7 +184,7 @@ async def male(interaction: discord.Interaction):
     with bot.session as session:
         if not is_admin(session=session, user=interaction.user):
             await interaction.response.send_message(
-                "You are not an admin, you can't use this command"
+                "You are not an admin, you can't use this command."
             )
             return
 
@@ -194,45 +194,69 @@ async def male(interaction: discord.Interaction):
         quizzes = session.query(Quiz).filter(Quiz.date >= today).all()
 
         if not quizzes:
-            await interaction.response.send_message("No planned quizzes")
+            await interaction.response.send_message("No planned quizzes.")
             return
 
-        # format the answer
-        planned_quizzes = "\n\n".join(
-            [
-                f"### {quiz.date} :\n \
-                - Female : {quiz.female_clip} {quiz.female_answer}\n \
-                - Male : {quiz.male_clip} {quiz.male_answer}"
-                for quiz in quizzes
-            ]
-        )
-        await interaction.response.send_message(planned_quizzes)
+        embed = discord.Embed(title="Planned Quizzes")
+
+        for quiz in quizzes:
+            embed.add_field(
+                name=f":calendar_spiral: __**{quiz.date}**__", value="", inline=False
+            )
+
+            embed.add_field(
+                name=":female_sign: Female",
+                value=f"[{quiz.female_answer}]({quiz.female_clip})",
+                inline=True,
+            )
+
+            embed.add_field(
+                name=":male_sign: Male",
+                value=f"[{quiz.male_answer}]({quiz.male_clip})",
+                inline=True,
+            )
+
+            # Linebreak unless last quiz
+            if quiz != quizzes[-1]:
+                embed.add_field(name="\u200b", value="", inline=False)
+
+        await interaction.response.send_message(embed=embed)
+
 
 class newquizbutton(discord.ui.View):
     def __init__(self):
         super().__init__()
         self.value = None
-    
+
     @discord.ui.button(label="Guess Male", style=discord.ButtonStyle.green)
-    async def postquizresults1(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def postquizresults1(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         with bot.session as session:
             quiz = get_current_quiz(session=session)
-        await interaction.response.send_message(f"**male clip:** {quiz.male_clip}", ephemeral=True)
+        await interaction.response.send_message(
+            f"**male clip:** {quiz.male_clip}", ephemeral=True
+        )
 
     @discord.ui.button(label="Guess Female", style=discord.ButtonStyle.green)
-    async def postquizresults2(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def postquizresults2(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         with bot.session as session:
             quiz = get_current_quiz(session=session)
-        await interaction.response.send_message(f"**female clip:** {quiz.female_clip}", ephemeral=True)
-        
+        await interaction.response.send_message(
+            f"**female clip:** {quiz.female_clip}", ephemeral=True
+        )
+
 
 @bot.event
 async def post_yesterdays_quiz_results():
-    channel_id = config["CHANNEL_ID"]  # Replace with the actual channel ID
+    channel_id = int(config["CHANNEL_ID"])  # Replace with the actual channel ID
     channel = bot.get_channel(channel_id)
 
     if not channel:
-        print("channel not found.")
+        print("Invalid channel ID.")
+        # await channel.send("Invalid channel ID.")
         return
 
     # Calculate the date for yesterday
@@ -243,8 +267,11 @@ async def post_yesterdays_quiz_results():
         quiz = session.query(Quiz).filter(Quiz.date == yesterday).first()
         answer = session.query(Answer).filter(Answer.user).first()
 
+    view = newquizbutton()
+
     if not quiz:
-        print("quiz not found for yesterday.")
+        embed = discord.Embed(title="There were no quizzes yesterday.")
+        await channel.send(embed=embed, view=view)
         return
 
     embed = discord.Embed(
@@ -276,11 +303,10 @@ async def post_yesterdays_quiz_results():
     embed.add_field(name="Most Guessed (Male)", value="TBA", inline=False)
     embed.add_field(name="Most Guessed (Female)", value="TBA", inline=False)
 
-    view = newquizbutton()
-    combined_message = await channel.send(embed=embed, view=view)
+    await channel.send(embed=embed, view=view)
 
 
-@bot.command() # for quick debugging
+@bot.command()  # for quick debugging
 async def postquizresults(ctx):
     await post_yesterdays_quiz_results()
 
@@ -294,7 +320,9 @@ async def female(interaction: discord.Interaction, seiyuu: str):
         quiz = get_current_quiz(session=session)
 
         if not quiz:
-            await interaction.response.send_message("no quiz today :(")
+            await interaction.response.send_message(
+                "No quiz today :disappointed_relieved:"
+            )
 
         user = get_user_from_id(
             session=session,
@@ -302,6 +330,15 @@ async def female(interaction: discord.Interaction, seiyuu: str):
             add_if_not_exist=True,
             user_name=interaction.user.name,
         )
+
+        # if the user has already answered the quiz correctly
+        # don't let them answer again
+        for answer in user.answers:
+            if answer.quiz_id == quiz.id and answer.is_correct:
+                await interaction.response.send_message(
+                    "You have already answered correctly for this quiz."
+                )
+                return
 
     # create the answer object
     user_answer = Answer(
@@ -348,7 +385,9 @@ async def male(interaction: discord.Interaction, seiyuu: str):
         quiz = get_current_quiz(session=session)
 
         if not quiz:
-            await interaction.response.send_message("no quiz today :(")
+            await interaction.response.send_message(
+                "No quiz today :disappointed_relieved:"
+            )
 
         user = get_user_from_id(
             session=session,
@@ -356,6 +395,15 @@ async def male(interaction: discord.Interaction, seiyuu: str):
             add_if_not_exist=True,
             user_name=interaction.user.name,
         )
+
+        # if the user has already answered the quiz correctly
+        # don't let them answer again
+        for answer in user.answers:
+            if answer.quiz_id == quiz.id and answer.is_correct:
+                await interaction.response.send_message(
+                    "You have already answered correctly for this quiz."
+                )
+                return
 
     # create the answer object
     user_answer = Answer(
@@ -406,7 +454,7 @@ async def mystats(interaction: discord.Interaction):
         )
 
         if not user:
-            await interaction.response.send_message("you have not played yet")
+            await interaction.response.send_message("You have not played yet.")
             return
 
         male_answers = [
@@ -417,17 +465,14 @@ async def mystats(interaction: discord.Interaction):
             answer for answer in user.answers if answer.answer_type == "female"
         ]
 
-        embed = discord.Embed(
-            title=f"{user.name}'s Stats",
-            color=0xBBE6F3,
-        )
+        embed = discord.Embed(title="")
 
         # Get the user's avatar URL
         avatar_url = interaction.user.avatar.url
         embed.set_author(name=interaction.user.name, icon_url=avatar_url)
 
         # Male Stats
-        embed.add_field(name="Male Stats", value="", inline=False)
+        embed.add_field(name="__**Male Stats**__", value="", inline=False)
         embed = generate_stats_embed_content(
             session=session, embed=embed, answers=male_answers
         )
@@ -436,7 +481,7 @@ async def mystats(interaction: discord.Interaction):
         embed.add_field(name="\u200b", value="", inline=False)
 
         # Female Stats
-        embed.add_field(name="Female Stats", value="", inline=False)
+        embed.add_field(name="__**Female Stats**__", value="", inline=False)
         embed = generate_stats_embed_content(
             session=session, embed=embed, answers=female_answers
         )
