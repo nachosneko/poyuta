@@ -238,32 +238,40 @@ def generate_stats_embed_content(session: Session, embed: Embed, answers: list[A
     Embed
         Filled embed.
     """
-    # Number of attempts
-    embed.add_field(name="Attempts", value=len(answers), inline=True)
 
-    # Average number of attempts per quiz
-    unique_quizzes = set([answer.quiz_id for answer in answers])
-    average_attempts = round(len(answers) / len(unique_quizzes), 2)
-    embed.add_field(
-        name="Average Attempts", value=f"{average_attempts} attempt(s)", inline=True
-    )
-
-    # Linebreak
-    embed.add_field(name="", value="", inline=False)
+    nb_unique_quizzes = len(set([answer.quiz_id for answer in answers]))
 
     # Guess Rates
     nb_correct_answers = len([answer for answer in answers if answer.is_correct])
-    guess_rate = round(nb_correct_answers / len(answers) * 100, 2)
+    guess_rate = round(nb_correct_answers / nb_unique_quizzes * 100, 2)
     embed.add_field(
-        name="Guess Rate",
-        value=f"{guess_rate}% ({nb_correct_answers}/{len(answers)})",
+        name="> :dart: Guess Rate",
+        value=f"> {guess_rate}% ({nb_correct_answers}/{nb_unique_quizzes})",
         inline=True,
     )
 
     # Average Guess Time
     # TODO retrieve from database once implemented
     # Hard coded for now for testing purposes
-    embed.add_field(name="Average Guess Time", value="N/A", inline=True)
+    embed.add_field(name="> :clock1: Average Guess Time", value="> N/A", inline=True)
+
+    embed.add_field(name="", value="", inline=False)
+
+    # Total attempts
+    embed.add_field(
+        name="> :1234: Total Attempts",
+        value=f"> {len(answers)} attempt(s)",
+        inline=True,
+    )
+
+    # Average number of attempts per quiz
+    unique_quizzes = set([answer.quiz_id for answer in answers])
+    average_attempts = round(len(answers) / len(unique_quizzes), 2)
+    embed.add_field(
+        name="> :repeat: Average Attempts",
+        value=f"> {average_attempts} attempt(s)",
+        inline=True,
+    )
 
     embed.add_field(name="", value="", inline=False)
 
@@ -275,27 +283,33 @@ def generate_stats_embed_content(session: Session, embed: Embed, answers: list[A
             "date": "2023-11-05",
             "guess_time": "N/A",
             "attempts": 1,
+            "answer": "Saori Hayami",
         },
         {
             "date": "2023-10-25",
             "guess_time": "N/A",
-            "attempts": "N/A",
+            "attempts": 3,
+            "answer": "Rie Takahashi",
         },
         {
             "date": "2023-09-20",
             "guess_time": "N/A",
-            "attempts": "N/A",
+            "attempts": 5,
+            "answer": "Hiro Shimono",
         },
     ]
-    fastest_guesses = "\n".join(
+
+    medals = [":first_place:", ":second_place:", ":third_place:"]
+
+    fastest_guesses = "\n\n".join(
         [
-            f"{guess['date']} : **{guess['guess_time']}s** ({guess['attempts']} attempts)"
-            for guess in fastest_guesses
+            f"{medals[i]} | **{guess['guess_time']}s** : {guess['answer']} in {guess['attempts']} attempts on {guess['date']}"
+            for i, guess in enumerate(fastest_guesses)
         ]
     )
 
     embed.add_field(
-        name="Fastest guesses",
+        name="__Fastest guesses__",
         value=fastest_guesses,
         inline=True,
     )
