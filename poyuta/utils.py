@@ -253,7 +253,7 @@ def generate_stats_embed_content(session: Session, embed: Embed, answers: list[A
 
     # Guess Rates
     nb_correct_answers = len([answer for answer in answers if answer.is_correct])
-    guess_rate = nb_correct_answers / len(answers)
+    guess_rate = round(nb_correct_answers / len(answers) * 100, 2)
     embed.add_field(
         name="Guess Rate",
         value=f"{guess_rate}% ({nb_correct_answers}/{len(answers)})",
