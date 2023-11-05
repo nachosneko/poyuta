@@ -1,12 +1,13 @@
 # Standard libraries
 import re
 from datetime import datetime, date, timedelta
+from typing import Optional
 
 # Discord
 import discord
-from discord import app_commands
+from discord import app_commands, Embed, Button, ButtonStyle
 from discord.ext import commands
-
+import random
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # Database
@@ -207,10 +208,27 @@ async def male(interaction: discord.Interaction):
         )
         await interaction.response.send_message(planned_quizzes)
 
+class newquizbutton(discord.ui.View):
+    def __init__(self):
+        super().__init__()
+        self.value = None
+    
+    @discord.ui.button(label="Guess Male", style=discord.ButtonStyle.green)
+    async def postquizresults1(self, interaction: discord.Interaction, button: discord.ui.Button):
+        with bot.session as session:
+            quiz = get_current_quiz(session=session)
+        await interaction.response.send_message(f"**male clip:** {quiz.male_clip}", ephemeral=True)
+
+    @discord.ui.button(label="Guess Female", style=discord.ButtonStyle.green)
+    async def postquizresults2(self, interaction: discord.Interaction, button: discord.ui.Button):
+        with bot.session as session:
+            quiz = get_current_quiz(session=session)
+        await interaction.response.send_message(f"**female clip:** {quiz.female_clip}", ephemeral=True)
+        
 
 @bot.event
 async def post_yesterdays_quiz_results():
-    channel_id = 366643056138518532  # Replace with the actual channel ID
+    channel_id = config["CHANNEL_ID"]  # Replace with the actual channel ID
     channel = bot.get_channel(channel_id)
 
     if not channel:
@@ -234,7 +252,7 @@ async def post_yesterdays_quiz_results():
         color=0xBBE6F3,
     )
     embed.set_author(
-        name=config["NEWQUIZ_EMBED_AUTHOR"], icon_url="https://i.imgur.com/6uKnKMS.png"
+        name=config["NEWQUIZ_EMBED_AUTHOR"], icon_url=config["AUTHOR_ICON_URL"]
     )
 
     embed.add_field(name="Male", value=f"||{quiz.male_answer}||", inline=True)
@@ -258,13 +276,13 @@ async def post_yesterdays_quiz_results():
     embed.add_field(name="Most Guessed (Male)", value="TBA", inline=False)
     embed.add_field(name="Most Guessed (Female)", value="TBA", inline=False)
 
-    await channel.send(embed=embed)
+    view = newquizbutton()
+    combined_message = await channel.send(embed=embed, view=view)
 
 
-@bot.command()
+@bot.command() # for quick debugging
 async def postquizresults(ctx):
     await post_yesterdays_quiz_results()
-    await ctx.send("(yesterdays quiz)")
 
 
 @bot.tree.command(name="female")
