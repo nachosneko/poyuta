@@ -14,6 +14,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from poyuta.database import (
     UserStartQuizTimestamp,
     Quiz,
+    QuizChannels,
     QuizType,
     Answer,
     SessionFactory,
@@ -26,9 +27,11 @@ from poyuta.utils import (
     load_environment,
     process_user_input,
     get_current_quiz_date,
+    reconstruct_discord_pfp_url,
     get_user_from_id,
     get_quiz_type_choices,
-    is_admin,
+    is_server_admin,
+    is_bot_admin,
     generate_stats_embed_content,
 )
 
@@ -41,7 +44,12 @@ intents = discord.Intents.all()
 intents.reactions = True
 intents.messages = True
 
-initialize_database(config["DEFAULT_ADMIN_ID"], config["DEFAULT_ADMIN_NAME"])
+
+initialize_database(
+    config["DEFAULT_ADMIN_ID"],
+    config["DEFAULT_ADMIN_NAME"],
+    True if config["USE_HISTORIC_DATA"] else False,
+)
 
 
 # Update bot class to include the session property
@@ -86,201 +94,6 @@ async def postquizresults(ctx):
     await post_yesterdays_quiz_results()
 
 
-@bot.tree.command(name="newquiz")
-@app_commands.choices(quiz_type=get_quiz_type_choices(session=bot.session))
-@app_commands.describe(
-    quiz_type="type of the quiz to update",
-    new_clip="input new clip for female",
-    new_answer="input new seiyuu for female clip",
-)
-async def new_quiz(
-    interaction: discord.Interaction,
-    quiz_type: app_commands.Choice[int],
-    new_clip: str,
-    new_answer: str,
-):
-    """*Admin only* - create a new quiz."""
-
-    with bot.session as session:
-        if not is_admin(session=session, user=interaction.user):
-            await interaction.response.send_message(
-                "You are not an admin, you can't use this command."
-            )
-            return
-
-        latest_quiz = (
-            session.query(Quiz)
-            .filter(Quiz.id_type == quiz_type.value)
-            .order_by(Quiz.date.desc())
-            .first()
-        )
-
-        # get current date
-        current_quiz_date = get_current_quiz_date(
-            daily_quiz_reset_time=DAILY_QUIZ_RESET_TIME
-        )
-
-        # if the latest quiz date is in the future
-        # that means there's already a quiz for today, so add the new date to the planned quizzes
-        # i.e latest quiz date + 1 day
-        if latest_quiz and latest_quiz.date >= current_quiz_date:
-            new_date = latest_quiz.date + timedelta(days=1)
-        # else there aren't any quiz today, so the new date is today
-        else:
-            new_date = current_quiz_date
-
-        # add the new quizzes to database
-        new_quiz = Quiz(
-            creator_id=interaction.user.id,
-            clip=new_clip,
-            answer=new_answer,
-            id_type=quiz_type.value,
-            date=new_date,
-        )
-        session.add(new_quiz)
-        session.commit()
-
-    await interaction.response.send_message(
-        f"New {quiz_type.name} quiz created on {new_date}."
-    )
-
-
-@bot.tree.command(name="updatequiz")
-@app_commands.choices(quiz_type=get_quiz_type_choices(session=bot.session))
-@app_commands.describe(
-    quiz_date="date of the quiz to update in YYYY-MM-DD format",
-    quiz_type="type of the quiz to update",
-    new_clip="input new clip for female",
-    new_answer="input new seiyuu for female clip",
-)
-async def update_quiz(
-    interaction: discord.Interaction,
-    quiz_date: str,
-    quiz_type: app_commands.Choice[int],
-    new_clip: str,
-    new_answer: str,
-):
-    """*Admin only* - Update a planned quiz."""
-
-    with bot.session as session:
-        if not is_admin(session=session, user=interaction.user):
-            await interaction.response.send_message(
-                "You are not an admin, you can't use this command."
-            )
-            return
-
-        try:
-            quiz_date = datetime.strptime(quiz_date, "%Y-%m-%d").date()
-        except ValueError:
-            await interaction.response.send_message(
-                "Invalid date format. Please use YYYY-MM-DD."
-            )
-            return
-
-        # check the date is in the future
-        if quiz_date <= get_current_quiz_date(DAILY_QUIZ_RESET_TIME):
-            await interaction.response.send_message(
-                "You can only update a quiz that hasn't happened yet. Please use a date in the future."
-            )
-            return
-
-        # check if that quiz exists for this quiz_type and quiz_date
-        quiz = (
-            session.query(Quiz)
-            .filter(Quiz.id_type == quiz_type.value, Quiz.date == quiz_date)
-            .first()
-        )
-
-        if not quiz:
-            await interaction.response.send_message(
-                f"No {quiz_type.name} quiz on {quiz_date}. Can't update it."
-            )
-            return
-
-        # Update attributes
-        quiz.clip = new_clip
-        quiz.answer = new_answer
-
-        # Commit the changes to the database
-        session.commit()
-
-        await interaction.response.send_message(
-            f"{quiz_type.name} quiz updated for {quiz_date}."
-        )
-
-
-@bot.tree.command(name="plannedquizzes")
-async def planned_quizzes(interaction: discord.Interaction):
-    """*Admin only* - Check the planned quizzes."""
-
-    with bot.session as session:
-        if not is_admin(session=session, user=interaction.user):
-            await interaction.response.send_message(
-                "You are not an admin, you can't use this command."
-            )
-            return
-
-        current_quiz_date = get_current_quiz_date(
-            daily_quiz_reset_time=DAILY_QUIZ_RESET_TIME
-        )
-
-        # get all the quizzes that are planned after the current quiz
-        unique_date = (
-            session.query(Quiz.date)
-            .filter(Quiz.date >= current_quiz_date)
-            .distinct()
-            .all()
-        )
-
-        if not unique_date:
-            await interaction.response.send_message(
-                f"No planned quizzes after {current_quiz_date}."
-            )
-            return
-
-        embed = discord.Embed(title="Planned Quizzes")
-
-        # get all the quiz types
-        quiz_types = session.query(QuizType).all()
-
-        for i, quiz_date in enumerate(unique_date):
-            quiz_date = quiz_date[0]
-
-            embed.add_field(
-                name=f":calendar_spiral: __**{quiz_date if i != 0 else 'Today'}**__",
-                value="",
-                inline=False,
-            )
-
-            for i, quiz_type in enumerate(quiz_types):
-                # get quiz for this type and date
-                quiz = (
-                    session.query(Quiz)
-                    .filter(Quiz.id_type == quiz_type.id, Quiz.date == quiz_date)
-                    .first()
-                )
-                value = (
-                    f"[{quiz.answer}]({quiz.clip})"
-                    if quiz
-                    else "Nothing planned :disappointed_relieved:"
-                )
-                embed.add_field(
-                    name=f"> {quiz_type.emoji} {quiz_type.type}",
-                    value=f"> {value}",
-                    inline=True,
-                )
-
-                # Linebreak every two types unless last type
-                if i % 2 == 0 and i != 0 and i != len(quiz_types) - 1:
-                    embed.add_field(name="", value="", inline=False)
-
-            # Linebreak unless last date
-            if quiz_date != unique_date[-1][0]:
-                embed.add_field(name="\u200b", value="", inline=False)
-
-        await interaction.response.send_message(embed=embed)
-
-
 @bot.tree.command(name="answerquiz")
 @app_commands.describe(
     quiz_type="type of the quiz to answer", answer="your answer for this quiz"
@@ -310,10 +123,7 @@ async def anwswer_quiz(
             )
 
         user = get_user_from_id(
-            session=session,
-            user_id=interaction.user.id,
-            add_if_not_exist=True,
-            user_name=interaction.user.name,
+            session=session, user=interaction.user, add_if_not_exist=True
         )
 
         # if the user has already answered the quiz correctly
@@ -390,9 +200,7 @@ async def my_stats(interaction: discord.Interaction):
     with bot.session as session:
         # get the user
         user = get_user_from_id(
-            session=session,
-            user_id=interaction.user.id,
-            add_if_not_exist=False,
+            session=session, user=interaction.user, add_if_not_exist=True
         )
 
         if not user:
@@ -401,9 +209,11 @@ async def my_stats(interaction: discord.Interaction):
 
         # create the embed object
         embed = discord.Embed(title="")
-        # Get the user's avatar URL
-        avatar_url = interaction.user.avatar.url
-        embed.set_author(name=interaction.user.name, icon_url=avatar_url)
+
+        # set the author
+        embed.set_author(
+            name=interaction.user.name, icon_url=interaction.user.avatar.url
+        )
 
         quiz_types = session.query(QuizType).all()
         for quiz_type in quiz_types:
@@ -432,27 +242,9 @@ async def my_stats(interaction: discord.Interaction):
 
 @bot.event
 async def post_yesterdays_quiz_results():
-    channel_id = int(config["CHANNEL_ID"])  # Replace with the actual channel ID
-    channel = bot.get_channel(channel_id)
-
-    if not channel:
-        print("Invalid channel ID.")
-        # await channel.send("Invalid channel ID.")
-        return
-
     # Calculate the date for yesterday
     current_quiz_date = get_current_quiz_date(DAILY_QUIZ_RESET_TIME)
     yesterday = current_quiz_date - timedelta(days=1)
-
-    embed = discord.Embed(
-        title=f"Yesterday's Quiz Results ({yesterday})",
-        color=0xBBE6F3,
-    )
-
-    # TODO : add the author of the quiz in database and retrieve it from there
-    embed.set_author(
-        name=config["NEWQUIZ_EMBED_AUTHOR"], icon_url=config["AUTHOR_ICON_URL"]
-    )
 
     # Query the database for the quiz that matches the calculated date
     with bot.session as session:
@@ -463,6 +255,11 @@ async def post_yesterdays_quiz_results():
                 session.query(Quiz)
                 .filter(Quiz.id_type == quiz_type.id, Quiz.date == yesterday)
                 .first()
+            )
+
+            embed = discord.Embed(
+                title=f"Yesterday's {quiz_type.type} Quiz Results",
+                color=0xBBE6F3,
             )
 
             embed.add_field(
@@ -476,6 +273,28 @@ async def post_yesterdays_quiz_results():
                 name="> Clip",
                 value=f"> {yesterday_quiz.clip}" if yesterday_quiz else "> N/A",
                 inline=True,
+            )
+
+            # if there was no quiz, don't need to send all the stats of the quiz
+            # stop the current iteration and go to the next quiz type
+            if not yesterday_quiz:
+                # send it on every channels set as quiz channel
+                for quiz_channel in session.query(QuizChannels).all():
+                    channel = bot.get_channel(quiz_channel.id_channel)
+                    await channel.send(embed=embed)
+                continue
+
+            # if we're here, that means there was a quiz
+
+            # TODO : add the author of the quiz in database and retrieve it from there
+            creator_pfp = reconstruct_discord_pfp_url(
+                user_id=yesterday_quiz.creator_id,
+                pfp_hash=yesterday_quiz.creator.pfp,
+            )
+
+            embed.set_author(
+                name=yesterday_quiz.creator.name,
+                icon_url=creator_pfp,
             )
 
             # Linebreak
@@ -493,21 +312,19 @@ async def post_yesterdays_quiz_results():
             embed.add_field(name="> Attempts", value="> TBA\n> TBA\n> TBA", inline=True)
             embed.add_field(name="Most Guessed", value="TBA", inline=False)
 
-            # Linebreak unless last quiz type
-            if quiz_type != quiz_types[-1]:
-                embed.add_field(name="\u200b", value="", inline=False)
+            # Send the message with the view
+            # send it on every channels set as quiz channel
+            for quiz_channel in session.query(QuizChannels).all():
+                channel = bot.get_channel(quiz_channel.id_channel)
+                await channel.send(embed=embed)
 
         # Create a single View
         view = NewQuizView()
-
-        # Send the message with the view
-        await channel.send(embed=embed, view=view)
+        await channel.send(view=view)
 
 
 class NewQuizButton(discord.ui.Button):
-    """
-    Class for the NewQuizButton
-    """
+    """Class for the NewQuizButton"""
 
     def __init__(
         self,
@@ -524,9 +341,8 @@ class NewQuizButton(discord.ui.Button):
         self.new_quiz_date = new_quiz_date
         self.quiz_type = quiz_type
 
-    async def callback(self, interaction: discord.Interaction):
+        # get quiz
         with bot.session as session:
-            # get quiz
             current_quiz = (
                 session.query(Quiz)
                 .filter(
@@ -536,22 +352,24 @@ class NewQuizButton(discord.ui.Button):
                 .first()
             )
 
-            if not current_quiz:
-                await interaction.response.send_message(
-                    f"No {self.quiz_type.type} quiz today :disappointed_relieved:",
-                    ephemeral=True,
-                )
-                return
+            self.current_quiz_id = current_quiz.id if current_quiz else None
+
+    async def callback(self, interaction: discord.Interaction):
+        if not self.current_quiz_id:
+            await interaction.response.send_message(
+                f"No {self.quiz_type.type} quiz today :disappointed_relieved:",
+                ephemeral=True,
+            )
+            return
+
+        with bot.session as session:
+            current_quiz = session.query(Quiz).get(self.current_quiz_id)
 
             user = get_user_from_id(
-                session=session,
-                user_id=interaction.user.id,
-                add_if_not_exist=True,
-                user_name=interaction.user.name,
+                session=session, user=interaction.user, add_if_not_exist=True
             )
 
-            # if they already clicked it before
-            # don't let them click it again
+            # make sure they didn't click it once already
             if user.id not in [
                 start_time.user_id for start_time in current_quiz.start_quiz_timestamps
             ]:
@@ -564,9 +382,25 @@ class NewQuizButton(discord.ui.Button):
                 session.add(new_start_quiz_timestamp)
                 session.commit()
 
-            await interaction.response.send_message(
-                f"**{self.quiz_type.type} clip:** {current_quiz.clip}", ephemeral=True
+            embed = discord.Embed(
+                title=f"{self.quiz_type.emoji} Today's {self.quiz_type.type} Quiz",
+                color=0xBBE6F3,
             )
+
+            embed.set_author(
+                name=current_quiz.creator.name,
+                icon_url=reconstruct_discord_pfp_url(
+                    user_id=current_quiz.creator_id, pfp_hash=current_quiz.creator.pfp
+                ),
+            )
+
+            embed.add_field(
+                name="",
+                value=current_quiz.clip,
+                inline=True,
+            )
+
+            await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 class NewQuizView(discord.ui.View):
@@ -577,3 +411,262 @@ class NewQuizView(discord.ui.View):
             for quiz_type in session.query(QuizType).all():
                 button = NewQuizButton(quiz_type=quiz_type)
                 self.add_item(button)
+
+
+# --- SERVER ADMIN COMMANDS --- #
+
+
+@commands.check(lambda ctx: is_server_admin(ctx, session=bot.session))
+@bot.command()
+async def setchannel(ctx):
+    """Set the current channel as the quiz main channel for this server."""
+
+    with bot.session as session:
+        # check if the channel is already set on this server
+        quiz_channel = session.query(QuizChannels).get(ctx.guild.id)
+
+        if quiz_channel and quiz_channel.id_channel == ctx.channel.id:
+            await ctx.send(
+                "This channel is already set as the quiz channel for this server."
+            )
+            return
+
+        if quiz_channel:
+            await ctx.send(
+                f"This server already has {bot.get_channel(quiz_channel.id_channel).mention} as its channel. Use {config['COMMAND_PREFIX']}unsetchannel to unset it and try again."
+            )
+            return
+
+        # add the channel to the database
+        new_quiz_channel = QuizChannels(
+            id_server=ctx.guild.id, id_channel=ctx.channel.id
+        )
+        session.add(new_quiz_channel)
+        session.commit()
+
+    await ctx.send(f"Quiz channel set to {ctx.channel.mention}.")
+
+
+@commands.check(lambda ctx: is_server_admin(ctx, session=bot.session))
+@bot.command()
+async def unsetchannel(ctx):
+    """Unset the current channel as the quiz main channel for this server."""
+
+    with bot.session as session:
+        # check if the channel is already set on this server
+        quiz_channel = session.query(QuizChannels).get(ctx.guild.id)
+
+        if not quiz_channel:
+            await ctx.send(
+                f"This server doesn't have a channel set.\nUse {config['COMMAND_PREFIX']}setchannel in a channel to set it as the Quiz channel."
+            )
+            return
+
+        # remove the channel from the database
+        session.delete(quiz_channel)
+        session.commit()
+
+    await ctx.send(
+        f"Quiz channel unset from {bot.get_channel(quiz_channel.id_channel).mention}."
+    )
+
+
+# --- BOT ADMIN COMMANDS --- #
+
+
+@bot.tree.command(name="newquiz")
+@app_commands.choices(quiz_type=get_quiz_type_choices(session=bot.session))
+@app_commands.describe(
+    quiz_type="type of the quiz to update",
+    new_clip="input new clip for female",
+    new_answer="input new seiyuu for female clip",
+)
+async def new_quiz(
+    interaction: discord.Interaction,
+    quiz_type: app_commands.Choice[int],
+    new_clip: str,
+    new_answer: str,
+):
+    """*Bot Admin only* - create a new quiz."""
+
+    with bot.session as session:
+        if not is_bot_admin(session=session, user=interaction.user):
+            await interaction.response.send_message(
+                "You are not an admin, you can't use this command."
+            )
+            return
+
+        latest_quiz = (
+            session.query(Quiz)
+            .filter(Quiz.id_type == quiz_type.value)
+            .order_by(Quiz.date.desc())
+            .first()
+        )
+
+        # get current date
+        current_quiz_date = get_current_quiz_date(
+            daily_quiz_reset_time=DAILY_QUIZ_RESET_TIME
+        )
+
+        # call this just to update pfp
+        get_user_from_id(session=session, user=interaction.user, add_if_not_exist=True)
+
+        # if the latest quiz date is in the future
+        # that means there's already a quiz for today, so add the new date to the planned quizzes
+        # i.e latest quiz date + 1 day
+        if latest_quiz and latest_quiz.date >= current_quiz_date:
+            new_date = latest_quiz.date + timedelta(days=1)
+        # else there aren't any quiz today, so the new date is today
+        else:
+            new_date = current_quiz_date
+
+        # add the new quizzes to database
+        new_quiz = Quiz(
+            creator_id=interaction.user.id,
+            clip=new_clip,
+            answer=new_answer,
+            id_type=quiz_type.value,
+            date=new_date,
+        )
+        session.add(new_quiz)
+        session.commit()
+
+    await interaction.response.send_message(
+        f"New {quiz_type.name} quiz created on {new_date}."
+    )
+
+
+@bot.tree.command(name="plannedquizzes")
+async def planned_quizzes(interaction: discord.Interaction):
+    """*Bot Admin only* - Check the planned quizzes."""
+
+    with bot.session as session:
+        if not is_bot_admin(session=session, user=interaction.user):
+            await interaction.response.send_message(
+                "You are not an admin, you can't use this command."
+            )
+            return
+
+        current_quiz_date = get_current_quiz_date(
+            daily_quiz_reset_time=DAILY_QUIZ_RESET_TIME
+        )
+
+        # get all the quizzes that are planned after the current quiz
+        unique_date = (
+            session.query(Quiz.date)
+            .filter(Quiz.date >= current_quiz_date)
+            .distinct()
+            .all()
+        )
+
+        if not unique_date:
+            await interaction.response.send_message(
+                f"No planned quizzes after {current_quiz_date}."
+            )
+            return
+
+        embed = discord.Embed(title="Planned Quizzes")
+
+        # get all the quiz types
+        quiz_types = session.query(QuizType).all()
+
+        for i, quiz_date in enumerate(unique_date):
+            quiz_date = quiz_date[0]
+
+            embed.add_field(
+                name=f":calendar_spiral: __**{quiz_date if i != 0 else 'Today'}**__",
+                value="",
+                inline=False,
+            )
+
+            for i, quiz_type in enumerate(quiz_types):
+                # get quiz for this type and date
+                quiz = (
+                    session.query(Quiz)
+                    .filter(Quiz.id_type == quiz_type.id, Quiz.date == quiz_date)
+                    .first()
+                )
+                value = (
+                    f"[{quiz.answer}]({quiz.clip})"
+                    if quiz
+                    else "Nothing planned :disappointed_relieved:"
+                )
+                embed.add_field(
+                    name=f"> {quiz_type.emoji} {quiz_type.type}",
+                    value=f"> {value}",
+                    inline=True,
+                )
+
+                # Linebreak every two types unless last type
+                if i % 2 == 0 and i != 0 and i != len(quiz_types) - 1:
+                    embed.add_field(name="", value="", inline=False)
+
+            # Linebreak unless last date
+            if quiz_date != unique_date[-1][0]:
+                embed.add_field(name="\u200b", value="", inline=False)
+
+        await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(name="updatequiz")
+@app_commands.choices(quiz_type=get_quiz_type_choices(session=bot.session))
+@app_commands.describe(
+    quiz_date="date of the quiz to update in YYYY-MM-DD format",
+    quiz_type="type of the quiz to update",
+    new_clip="input new clip for female",
+    new_answer="input new seiyuu for female clip",
+)
+async def update_quiz(
+    interaction: discord.Interaction,
+    quiz_date: str,
+    quiz_type: app_commands.Choice[int],
+    new_clip: str,
+    new_answer: str,
+):
+    """*Bot Admin only* - Update a planned quiz."""
+
+    with bot.session as session:
+        if not is_bot_admin(session=session, user=interaction.user):
+            await interaction.response.send_message(
+                "You are not an admin, you can't use this command."
+            )
+            return
+
+        try:
+            quiz_date = datetime.strptime(quiz_date, "%Y-%m-%d").date()
+        except ValueError:
+            await interaction.response.send_message(
+                "Invalid date format. Please use YYYY-MM-DD."
+            )
+            return
+
+        # check the date is in the future
+        if quiz_date <= get_current_quiz_date(DAILY_QUIZ_RESET_TIME):
+            await interaction.response.send_message(
+                "You can only update a quiz that hasn't happened yet. Please use a date in the future."
+            )
+            return
+
+        # check if that quiz exists for this quiz_type and quiz_date
+        quiz = (
+            session.query(Quiz)
+            .filter(Quiz.id_type == quiz_type.value, Quiz.date == quiz_date)
+            .first()
+        )
+
+        if not quiz:
+            await interaction.response.send_message(
+                f"No {quiz_type.name} quiz on {quiz_date}. Can't update it."
+            )
+            return
+
+        # Update attributes
+        quiz.clip = new_clip
+        quiz.answer = new_answer
+
+        # Commit the changes to the database
+        session.commit()
+
+        await interaction.response.send_message(
+            f"{quiz_type.name} quiz updated for {quiz_date}."
+        )
