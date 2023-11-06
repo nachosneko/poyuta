@@ -312,18 +312,21 @@ def generate_stats_embed_content(session: Session, embed: Embed, user_id: int, q
         # Fastest Guesses for this user
         fastest_answers = (
             session.query(Answer).join(Quiz)
-            .filter(Answer.user_id == answers[0].user_id, Quiz.id_type == quiz_type.id, Answer.is_correct)
+            .filter(Answer.user_id == user_id, Quiz.id_type == quiz_type.id, Answer.is_correct)
             .order_by(Answer.answer_time)
             .limit(3)
             .all()
         )
-        print(fastest_answers)
+
+        nb_attempts = []
+        for fastest_answer in fastest_answers:
+            nb_attempts.append(session.query(Answer).filter(Answer.user_id == user_id, Answer.quiz_id == fastest_answer.quiz_id).count())
 
         medals = [":first_place:", ":second_place:", ":third_place:"]
 
         fastest_answers = "\n\n".join(
             [
-                f"{medals[i]} | **{answer.answer_time}s** : {answer.answer} in {'TODO'} attempts on {answer.quiz.date}"
+                f"{medals[i]} | **{answer.answer_time}s** : {answer.answer} in {nb_attempts[i]} attempts on {answer.quiz.date}"
                 for i, answer in enumerate(fastest_answers)
             ]
         )
