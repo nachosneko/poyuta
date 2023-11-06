@@ -5,6 +5,7 @@ Utility functions for the bot.
 # Standard library imports
 import os
 import re
+import numpy as np
 from datetime import datetime, date, time, timedelta
 
 # Discord.py
@@ -239,7 +240,7 @@ def is_bot_admin(session: Session, user: User):
     return user.id in [admin.id for admin in admins]
 
 
-def generate_stats_embed_content(session: Session, embed: Embed, answers: list[Answer]):
+def generate_stats_embed_content(session: Session, embed: Embed, user_id: int, quiz_type: Quiz):
     """Generate the stats embed content.
 
     Parameters
@@ -259,84 +260,77 @@ def generate_stats_embed_content(session: Session, embed: Embed, answers: list[A
         Filled embed.
     """
 
-    nb_unique_quizzes = len(set([answer.quiz_id for answer in answers]))
+    with session as session: 
+        # Get the answers for this type
+        answers = session.query(Answer).join(Quiz).filter(Answer.user_id == user_id, Quiz.id_type == quiz_type.id).all()
 
-    # Guess Rates
-    nb_correct_answers = len([answer for answer in answers if answer.is_correct])
-    guess_rate = (
-        round(nb_correct_answers / nb_unique_quizzes * 100, 2)
-        if nb_unique_quizzes
-        else "N/A"
-    )
-    embed.add_field(
-        name="> :dart: Guess Rate",
-        value=f"> {guess_rate}% ({nb_correct_answers}/{nb_unique_quizzes})",
-        inline=True,
-    )
+        nb_unique_quizzes = len(set([answer.quiz_id for answer in answers]))
 
-    # Average Guess Time
-    # TODO retrieve from database once implemented
-    # Hard coded for now for testing purposes
-    embed.add_field(name="> :clock1: Average Guess Time", value="> N/A", inline=True)
+        # Guess Rates
+        nb_correct_answers = len([answer for answer in answers if answer.is_correct])
+        guess_rate = (
+            round(nb_correct_answers / nb_unique_quizzes * 100, 2)
+            if nb_unique_quizzes
+            else "N/A"
+        )
+        embed.add_field(
+            name="> :dart: Guess Rate",
+            value=f"> {guess_rate}% ({nb_correct_answers}/{nb_unique_quizzes})",
+            inline=True,
+        )
 
-    embed.add_field(name="", value="", inline=False)
+        # Average Guess Time
+        average_guess_time = (
+            round(np.mean([answer.answer_time for answer in answers if answer.is_correct]), 2)
+            if answers
+            else "N/A"
+        )
+        embed.add_field(name="> :clock1: Average Guess Time", value=f"> {average_guess_time}s", inline=True)
 
-    # Total attempts
-    embed.add_field(
-        name="> :1234: Total Attempts",
-        value=f"> {len(answers)} attempt(s)",
-        inline=True,
-    )
+        embed.add_field(name="", value="", inline=False)
 
-    # Average number of attempts per quiz
-    unique_quizzes = set([answer.quiz_id for answer in answers])
-    average_attempts = (
-        round(len(answers) / len(unique_quizzes), 2) if unique_quizzes else "N/A"
-    )
-    embed.add_field(
-        name="> :repeat: Average Attempts",
-        value=f"> {average_attempts} attempt(s)",
-        inline=True,
-    )
+        # Total attempts
+        embed.add_field(
+            name="> :1234: Total Attempts",
+            value=f"> {len(answers)} attempt(s)",
+            inline=True,
+        )
 
-    embed.add_field(name="", value="", inline=False)
+        # Average number of attempts per quiz
+        unique_quizzes = set([answer.quiz_id for answer in answers])
+        average_attempts = (
+            round(len(answers) / len(unique_quizzes), 2) if unique_quizzes else "N/A"
+        )
+        embed.add_field(
+            name="> :repeat: Average Attempts",
+            value=f"> {average_attempts} attempt(s)",
+            inline=True,
+        )
 
-    # Fastest Guesses
-    # TODO retrieve from database once implemented
-    # Hard coded for now for testing purposes
-    fastest_guesses = [
-        {
-            "date": "2023-11-05",
-            "guess_time": "N/A",
-            "attempts": 1,
-            "answer": "Saori Hayami",
-        },
-        {
-            "date": "2023-10-25",
-            "guess_time": "N/A",
-            "attempts": 3,
-            "answer": "Rie Takahashi",
-        },
-        {
-            "date": "2023-09-20",
-            "guess_time": "N/A",
-            "attempts": 5,
-            "answer": "Hiro Shimono",
-        },
-    ]
+        embed.add_field(name="", value="", inline=False)
 
-    medals = [":first_place:", ":second_place:", ":third_place:"]
+        # Fastest Guesses for this user
+        fastest_answers = (
+            session.query(Answer).join(Quiz)
+            .filter(Answer.user_id == answers[0].user_id, Quiz.id_type == quiz_type.id, Answer.is_correct)
+            .order_by(Answer.answer_time)
+            .limit(3)
+            .all()
+        )
+        print(fastest_answers)
 
-    fastest_guesses = "\n\n".join(
-        [
-            f"{medals[i]} | **{guess['guess_time']}s** : {guess['answer']} in {guess['attempts']} attempts on {guess['date']}"
-            for i, guess in enumerate(fastest_guesses)
-        ]
-    )
+        medals = [":first_place:", ":second_place:", ":third_place:"]
+
+        fastest_answers = "\n\n".join(
+            [
+                f"{medals[i]} | **{answer.answer_time}s** : {answer.answer} in {'TODO'} attempts on {answer.quiz.date}"
+                for i, answer in enumerate(fastest_answers)
+            ]
+        )
 
     embed.add_field(
         name="__Fastest guesses__",
-        value=fastest_guesses,
+        value=fastest_answers,
         inline=True,
     )
 
