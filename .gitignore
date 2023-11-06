@@ -1,5 +1,5 @@
 # Poyuta database
-database
+database/poyuta.cython_debug
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

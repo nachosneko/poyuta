@@ -1,50 +1,23 @@
-# Discord Bot
+# Poyuta
 
-Role attribution & auto-react for seiyuudle
+Poyuta is a Discord bot that allows you to play the `Seiyuudle` game in your Discord server. Seiyuudle is a derivative of the game [Wordle](https://www.nytimes.com/games/wordle/index.html) where you have to guess the name of a seiyuu from an audio clip of them.
 
-## Installation
+## Install
 
-Clone the repository :
+If you want to run your own instance of the bot, please read [INSTALL.md](/INSTALL.md).
 
-```bash
-git clone https://github.com/nachosneko/poyuta.git
-cd poyuta
-```
+## Usage
 
-Create a virtual environment :
+Once the bot is added on your server, set it up in the channel of your choice with this command :
 
 ```bash
-python -m venv venv
+!setchannel
 ```
 
-Load the virtual environment :
+If you want to change the channel, just run the command again.
 
-```bash
-venv\Scripts\activate # Windows
-source venv/bin/activate # Linux
-```
+The bot will send a new quiz every day at 18:00 UTC.
 
-Install the dependencies in the virtual environment :
+## License
 
-```bash
-pip install -r requirements.txt
-```
-
-## Configure
-
-Copy the .env.shared file to .env.secret :
-
-```bash
-copy .env.shared .env.secret # Windows
-cp .env.shared .env.secret # Linux
-```
-
-And fill the .env.secret file with your own configuration.
-
-## Run
-
-Run the bot :
-
-```bash
-python runner.py
-```
+The code is licensed under [MIT License](/LICENSE)

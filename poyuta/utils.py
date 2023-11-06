@@ -8,7 +8,8 @@ import re
 from datetime import datetime, date, time, timedelta
 
 # Discord.py
-from discord import app_commands, Embed
+from discord import app_commands, Embed, Interaction, Member
+from discord.ext import commands
 
 # Third party imports
 from dotenv import dotenv_values
@@ -195,8 +196,29 @@ def process_user_input(
     return output_str
 
 
-def is_admin(session: Session, user: User):
-    """Check if a user is an admin.
+async def is_server_admin(ctx: commands.Context, session: Session):
+    """Check if a user is a server admin.
+
+    Parameters
+    ----------
+    ctx : commands.Context
+        Context of the command.
+
+    session : Session
+        Database session.
+
+    Returns
+    -------
+    bool
+        Whether the user is an admin or not.
+    """
+    return is_bot_admin(session, ctx.author) or (
+        isinstance(ctx.author, Member) and ctx.author.guild_permissions.administrator
+    )
+
+
+def is_bot_admin(session: Session, user: User):
+    """Check if a user is a bot admin.
 
     Parameters
     ----------
@@ -209,15 +231,12 @@ def is_admin(session: Session, user: User):
     Returns
     -------
     bool
-        Whether the user is an admin or not.
+        Whether the user is a bot admin or not.
     """
 
-    admins = session.query(User).filter(User.is_admin == True).all()
+    admins = session.query(User).filter(User.is_admin is True).all()
 
-    if user.id in [admin.id for admin in admins]:
-        return True
-    else:
-        return False
+    return user.id in [admin.id for admin in admins]
 
 
 def generate_stats_embed_content(session: Session, embed: Embed, answers: list[Answer]):
@@ -352,11 +371,49 @@ def get_current_quiz_date(daily_quiz_reset_time: time) -> date:
     )
 
 
+def reconstruct_discord_pfp_url(user_id: int, pfp_hash: str) -> str:
+    """Reconstruct the discord pfp url from the user ID and pfp hash.
+
+    Parameters
+    ----------
+    user_id : int
+        Discord user ID.
+
+    pfp_hash : str
+        Discord pfp hash.
+
+    Returns
+    -------
+    str
+        Discord pfp url.
+    """
+
+    return f"https://cdn.discordapp.com/avatars/{user_id}/{pfp_hash}.png?size=1024"
+
+
+def extract_hash_from_discord_pfp_url(pfp_url: str) -> str:
+    """Extract the hash from a discord pfp url.
+
+    Parameters
+    ----------
+    pfp_url : str
+        Discord pfp url.
+
+    Returns
+    -------
+    str
+        Hash.
+    """
+
+    # https://cdn.discordapp.com/avatars/240181741703266304/545642146415.png?size=1024
+
+    return pfp_url.split("/")[-1].split(".")[0]
+
+
 def get_user_from_id(
     session: Session,
-    user_id: int,
+    user: Interaction.user,
     add_if_not_exist: bool = True,
-    user_name: str = None,
 ):
     """Get the user from the database from its discord ID.
 
@@ -365,14 +422,11 @@ def get_user_from_id(
     session : Session
         Database session.
 
-    user_id : int
-        User discord ID.
+    user : Interaction.user
+        Discord user.
 
     add_if_not_exist : bool, optional
         Whether to add the user to the database if it doesn't exist, by default True.
-
-    user_name : str
-        User name if the user is added to the database.
 
     Returns
     -------
@@ -380,14 +434,27 @@ def get_user_from_id(
         User from the database.
     """
 
-    user = session.query(User).filter(User.id == user_id).first()
+    # extract pfp hash from discord pfp url
+    pfp_hash = extract_hash_from_discord_pfp_url(user.avatar.url)
 
-    if not user and add_if_not_exist:
-        if not user_name:
-            raise ValueError("user_name must be provided if add_if_not_exist is True")
+    # try to get the user from the database
+    db_user = session.query(User).filter(User.id == user.id).first()
 
-        user = User(id=user_id, name=user_name, is_admin=False)
-        session.add(user)
+    # add user if it doesn't exist and add_if_not_exist is True
+    if not db_user and add_if_not_exist:
+        db_user = User(
+            id=user.id,
+            name=user.name,
+            pfp=pfp_hash,
+            is_admin=False,
+        )
+        session.add(db_user)
+        session.commit()
+
+    # update pfp if it changed
+    if db_user.pfp != pfp_hash:
+        print("updating pfp")
+        db_user.pfp = pfp_hash
         session.commit()
 
     return user

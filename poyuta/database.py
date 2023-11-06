@@ -3,7 +3,7 @@ from pathlib import Path
 
 # SQLAlchemy
 import sqlalchemy as sa
-from sqlalchemy import create_engine, inspect, UniqueConstraint
+from sqlalchemy import create_engine, inspect, UniqueConstraint, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 
@@ -13,9 +13,6 @@ Base = declarative_base()
 # SQLAlchemy setup
 DATABASE_PATH = Path("database")
 DATABASE_PATH.mkdir(exist_ok=True)
-
-ADMIN_PFP_PATH = Path("database/admin_pfp")
-ADMIN_PFP_PATH.mkdir(exist_ok=True)
 
 DATABASE_URL = f"sqlite:///{DATABASE_PATH}/poyuta.db"
 engine = create_engine(
@@ -35,11 +32,18 @@ INITIAL_QUIZ_TYPES = [
 ]
 
 
-# Define the User class
+class QuizChannels(Base):
+    __tablename__ = "quiz_channels"
+
+    id_server = sa.Column(sa.Integer, primary_key=True)
+    id_channel = sa.Column(sa.Integer, nullable=False)
+
+
 class User(Base):
     __tablename__ = "users"
     id = sa.Column(sa.Integer, primary_key=True)
     name = sa.Column(sa.String, nullable=False)
+    pfp = sa.Column(sa.String, nullable=True)
     is_admin = sa.Column(sa.Boolean, nullable=False, default=False)
 
 
@@ -53,7 +57,7 @@ class QuizType(Base):
 
 # Define the Quiz class
 class Quiz(Base):
-    __tablename__ = "quiz"
+    __tablename__ = "quizzes"
     id = sa.Column(sa.Integer, primary_key=True)
     creator_id = sa.Column(sa.Integer, sa.ForeignKey(User.id), nullable=False)
     creator = relationship(User, backref="quizzes_created")
@@ -103,12 +107,14 @@ class UserStartQuizTimestamp(Base):
     __table_args__ = (UniqueConstraint("user_id", "quiz_id", name="uq_userid_quizid"),)
 
 
-def initialize_database(default_admin_id, default_admin_name):
+def initialize_database(
+    default_admin_id: id, default_admin_name: str, use_historic_data: bool = False
+):
     inspector = inspect(engine)
 
     if (
         not inspector.has_table("users")
-        or not inspector.has_table("quiz")
+        or not inspector.has_table("quizzes")
         or not inspector.has_table("user_start_quiz_timestamp")
     ):
         # Create the tables
@@ -130,5 +136,18 @@ def initialize_database(default_admin_id, default_admin_name):
                     )
                 )
                 print(f"Initial quiz type '{initial_quiz_type}' created.")
+
+            if use_historic_data:
+                # get the sql script
+                with open(DATABASE_PATH / "historic_data.sql") as f:
+                    sql_script = f.read()
+
+                    # Split the script into individual statements
+                    statements = sql_script.split(";")
+
+                    # Execute each statement
+                    for statement in statements:
+                        if statement.strip():  # Skip empty statements
+                            session.execute(text(statement.strip()))
 
             session.commit()
