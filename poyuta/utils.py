@@ -7,16 +7,17 @@ import os
 import re
 from datetime import datetime, date, time, timedelta
 
+# Discord.py
+from discord import app_commands, Embed
+
 # Third party imports
 from dotenv import dotenv_values
 
 # Database models
-from poyuta.database import Quiz, Answer, User
+from poyuta.database import Quiz, QuizType, Answer, User
 
 # Typing helpers
-
 from sqlalchemy.orm.session import Session
-from discord import Embed
 
 # Define a list of replacement rules
 ANIME_REGEX_REPLACE_RULES = [
@@ -243,7 +244,11 @@ def generate_stats_embed_content(session: Session, embed: Embed, answers: list[A
 
     # Guess Rates
     nb_correct_answers = len([answer for answer in answers if answer.is_correct])
-    guess_rate = round(nb_correct_answers / nb_unique_quizzes * 100, 2)
+    guess_rate = (
+        round(nb_correct_answers / nb_unique_quizzes * 100, 2)
+        if nb_unique_quizzes
+        else "N/A"
+    )
     embed.add_field(
         name="> :dart: Guess Rate",
         value=f"> {guess_rate}% ({nb_correct_answers}/{nb_unique_quizzes})",
@@ -266,7 +271,9 @@ def generate_stats_embed_content(session: Session, embed: Embed, answers: list[A
 
     # Average number of attempts per quiz
     unique_quizzes = set([answer.quiz_id for answer in answers])
-    average_attempts = round(len(answers) / len(unique_quizzes), 2)
+    average_attempts = (
+        round(len(answers) / len(unique_quizzes), 2) if unique_quizzes else "N/A"
+    )
     embed.add_field(
         name="> :repeat: Average Attempts",
         value=f"> {average_attempts} attempt(s)",
@@ -345,52 +352,6 @@ def get_current_quiz_date(daily_quiz_reset_time: time) -> date:
     )
 
 
-def get_current_quizzes(
-    session: Session, daily_quiz_reset_time: time
-) -> list[Quiz] | None:
-    """Get the current quiz from the database.
-
-    Parameters
-    ----------
-    session : Session
-        Database session.
-
-    daily_quiz_reset_time : time
-        Time at which the daily quiz resets. HH:MM:SS format.
-
-    Returns
-    -------
-    Quiz
-        Today quizzes or last quizzes if there are no quizzes planned today.
-    """
-
-    # get today's date
-    today = get_current_quiz_date(daily_quiz_reset_time)
-
-    # get today's quizzes
-    quizzes = (
-        session.query(Quiz).filter(Quiz.date == today).order_by(Quiz.id.desc()).all()
-    )
-
-    # if no quiz today, backup with most recent quizzes before today
-    if not quizzes:
-        unique_date = (
-            session.query(Quiz.date)
-            .filter(Quiz.date < today)
-            .order_by(Quiz.date.desc())
-            .first()
-        )
-        if unique_date:
-            quizzes = (
-                session.query(Quiz)
-                .filter(Quiz.date == unique_date[0])
-                .order_by(Quiz.id.desc())
-                .all()
-            )
-
-    return quizzes
-
-
 def get_user_from_id(
     session: Session,
     user_id: int,
@@ -430,3 +391,25 @@ def get_user_from_id(
         session.commit()
 
     return user
+
+
+def get_quiz_type_choices(session: Session) -> list[tuple[int, str]]:
+    """Get the quiz type choices.
+
+    Parameters
+    ----------
+    session : Session
+        Database session.
+
+    Returns
+    -------
+    list[tuple[int, str]]
+        List of quiz type choices.
+    """
+
+    quiz_types = session.query(QuizType).distinct().all()
+
+    return [
+        app_commands.Choice(value=quiz_type.id, name=quiz_type.type)
+        for quiz_type in quiz_types
+    ]
