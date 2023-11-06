@@ -421,25 +421,18 @@ async def post_yesterdays_quiz_results():
     current_quiz_date = get_current_quiz_date(DAILY_QUIZ_RESET_TIME)
     yesterday = current_quiz_date - timedelta(days=1)
 
+    embed = discord.Embed(
+        title=f"Yesterday's Quiz Results ({yesterday})",
+        color=0xBBE6F3,
+    )
+
+    # TODO : add the author of the quiz in database and retrieve it from there
+    embed.set_author(
+        name=config["NEWQUIZ_EMBED_AUTHOR"], icon_url=config["AUTHOR_ICON_URL"]
+    )
+
     # Query the database for the quiz that matches the calculated date
     with bot.session as session:
-        # check there are quizzes for yesterday
-        quiz = session.query(Quiz).filter(Quiz.date == yesterday).first()
-        if not quiz:
-            embed = discord.Embed(title="There were no quizzes yesterday.")
-            await channel.send(
-                embed=embed, view=NewQuizButton(new_quiz_date=current_quiz_date)
-            )
-            return
-
-        embed = discord.Embed(
-            title="Yesterday's Quiz Results",
-            color=0xBBE6F3,
-        )
-        embed.set_author(
-            name=config["NEWQUIZ_EMBED_AUTHOR"], icon_url=config["AUTHOR_ICON_URL"]
-        )
-
         quiz_types = session.query(QuizType).all()
         for i, quiz_type in enumerate(quiz_types):
             # get yesterday's male quiz
@@ -450,15 +443,15 @@ async def post_yesterdays_quiz_results():
             )
 
             embed.add_field(
-                name=f"{quiz_type.emoji} {quiz_type.type}",
-                value=f"||{yesterday_quiz.answer}||"
+                name=f"> {quiz_type.emoji} {quiz_type.type}",
+                value=f"> ||{yesterday_quiz.answer}||"
                 if yesterday_quiz
-                else "No quiz took place :disappointed_relieved:",
+                else "> No quiz took place :disappointed_relieved:",
                 inline=True,
             )
             embed.add_field(
-                name="Clip",
-                value=yesterday_quiz.clip if yesterday_quiz else "None",
+                name="> Clip",
+                value=f"> {yesterday_quiz.clip}" if yesterday_quiz else "> N/A",
                 inline=True,
             )
 
@@ -467,14 +460,14 @@ async def post_yesterdays_quiz_results():
 
             # Top Guesseres TODO
             embed.add_field(
-                name="Top Guessers",
-                value=f"\nTODO\nValue 1 Line 2\nValue 1 Line 3",
+                name="> Top Guessers",
+                value=f"> TBA\n> TBA\n> TBA",
                 inline=True,
             )
 
             # TODO
-            embed.add_field(name="Time(?)", value="TBA", inline=True)
-            embed.add_field(name="Attempts", value="TBA", inline=True)
+            embed.add_field(name="> Time(?)", value="> TBA\n> TBA\n> TBA", inline=True)
+            embed.add_field(name="> Attempts", value="> TBA\n> TBA\n> TBA", inline=True)
             embed.add_field(name="Most Guessed", value="TBA", inline=False)
 
             # Linebreak unless last quiz type
