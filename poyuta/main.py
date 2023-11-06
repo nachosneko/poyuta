@@ -81,6 +81,11 @@ async def on_ready():
     scheduler.start()
 
 
+@bot.command()  # for quick debugging
+async def postquizresults(ctx):
+    await post_yesterdays_quiz_results()
+
+
 @bot.tree.command(name="newquiz")
 @app_commands.choices(quiz_type=get_quiz_type_choices(session=bot.session))
 @app_commands.describe(
@@ -126,6 +131,7 @@ async def new_quiz(
 
         # add the new quizzes to database
         new_quiz = Quiz(
+            creator_id=interaction.user.id,
             clip=new_clip,
             answer=new_answer,
             id_type=quiz_type.value,
@@ -285,7 +291,7 @@ async def anwswer_quiz(
 ):
     """guess the seiyuu for the current quiz_type quiz."""
 
-    timestamp = datetime.now()
+    answer_time = datetime.now()
 
     with bot.session as session:
         current_quiz_date = get_current_quiz_date(
@@ -319,17 +325,39 @@ async def anwswer_quiz(
                 )
                 return
 
+        # get the time at which the user clicked the button
+        start_quiz_timestamp = (
+            session.query(UserStartQuizTimestamp)
+            .filter(
+                UserStartQuizTimestamp.user_id == user.id,
+                UserStartQuizTimestamp.quiz_id == quiz.id,
+            )
+            .first()
+        )
+
+        # if the user hasn't clicked the button yet
+        # don't let them answer
+        if not start_quiz_timestamp:
+            await interaction.response.send_message(
+                f"You haven't started the {quiz_type.name} quiz yet. How do you know the answer? :HMM:"
+            )
+            return
+
+        # compute answer time in seconds
+        answer_time = answer_time - start_quiz_timestamp.timestamp
+        answer_time = answer_time.total_seconds()
+
     # create the answer object
     user_answer = Answer(
         user_id=user.id,
         quiz_id=quiz.id,
         answer=answer,
-        timestamp=timestamp,
+        answer_time=answer_time,
     )
 
     # Generate a pattern to match with the correct answer
     user_answer_pattern = process_user_input(
-        user_answer, partial_match=False, swap_words=True
+        user_answer.answer, partial_match=False, swap_words=True
     )
 
     # If the pattern matches : the answer is correct
@@ -400,11 +428,6 @@ async def my_stats(interaction: discord.Interaction):
                 embed.add_field(name="\u200b", value="", inline=False)
 
     await interaction.response.send_message(embed=embed)
-
-
-@bot.command()  # for quick debugging
-async def postquizresults(ctx):
-    await post_yesterdays_quiz_results()
 
 
 @bot.event
@@ -515,7 +538,8 @@ class NewQuizButton(discord.ui.Button):
 
             if not current_quiz:
                 await interaction.response.send_message(
-                    f"No {self.quiz_type.type} quiz today :disappointed_relieved:"
+                    f"No {self.quiz_type.type} quiz today :disappointed_relieved:",
+                    ephemeral=True,
                 )
                 return
 
