@@ -20,6 +20,25 @@ engine = create_engine(
 )
 SessionFactory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+INITIAL_QUIZ_TYPES = [
+    {
+        "type": "Male Seiyuu",
+        "emoji": ":male_sign:",
+    },
+    {
+        "type": "Female Seiyuu",
+        "emoji": ":female_sign:",
+    },
+]
+
+
+class QuizType(Base):
+    __tablename__ = "quiz_type"
+
+    id = sa.Column(sa.Integer, primary_key=True)
+    type = sa.Column(sa.String, nullable=False, unique=True)
+    emoji = sa.Column(sa.String, nullable=False)
+
 
 # Define the Quiz class
 class Quiz(Base):
@@ -28,10 +47,11 @@ class Quiz(Base):
     date = sa.Column(sa.Date, nullable=False)
     clip = sa.Column(sa.String, nullable=False)
     answer = sa.Column(sa.String, nullable=False)
-    type = sa.Column(sa.String, nullable=False)
+    id_type = sa.Column(sa.Integer, sa.ForeignKey(QuizType.id))
+    type = relationship(QuizType, backref="quizzes")
 
     # ensure there's only one type of quiz per day
-    __table_args__ = (UniqueConstraint("date", "type", name="uq_date_type"),)
+    __table_args__ = (UniqueConstraint("date", "id_type", name="uq_date_type"),)
 
 
 # Define the User class
@@ -56,17 +76,24 @@ class Answer(Base):
     answer = sa.Column(sa.String, nullable=False)
     is_correct = sa.Column(sa.Boolean, nullable=False)
 
-
-class Interaction(Base):
-    __tablename__ = "interactions"
-    id = sa.Column(sa.Integer, primary_key=True)
-    user_id = sa.Column(sa.Integer, sa.ForeignKey(User.id))
-    user = relationship(User, backref="interactions")
     timestamp = sa.Column(sa.DateTime, nullable=False)
-    button_label = sa.Column(sa.String, nullable=False)
-    command_type = sa.Column(
-        sa.String, nullable=False
-    )  # "male" or "female" for example
+
+
+class UserStartQuizTimestamp(Base):
+    __tablename__ = "user_start_quiz_timestamp"
+
+    id = sa.Column(sa.Integer, primary_key=True)
+
+    user_id = sa.Column(sa.Integer, sa.ForeignKey(User.id))
+    user = relationship(User, backref="start_quiz_timestamp")
+
+    quiz_id = sa.Column(sa.Integer, sa.ForeignKey(Quiz.id))
+    quiz = relationship(Quiz, backref="start_quiz_timestamps")
+
+    timestamp = sa.Column(sa.DateTime, nullable=False)
+
+    # ensure there's only one start quiz timestamp per user per quiz
+    __table_args__ = (UniqueConstraint("user_id", "quiz_id", name="uq_userid_quizid"),)
 
 
 def initialize_database(default_admin_id, default_admin_name):
@@ -75,19 +102,26 @@ def initialize_database(default_admin_id, default_admin_name):
     if (
         not inspector.has_table("users")
         or not inspector.has_table("quiz")
-        or not inspector.has_table("interactions")
+        or not inspector.has_table("user_start_quiz_timestamp")
     ):
         # Create the tables
         Base.metadata.create_all(bind=engine)
 
         # Create a session
-        session = SessionFactory()
+        with SessionFactory() as session:
+            # add the default admin user
+            default_admin = User(
+                id=default_admin_id, name=default_admin_name, is_admin=True
+            )
+            session.add(default_admin)
+            print(f"Default admin user ({default_admin_name}) created.")
 
-        # add the default admin user
-        default_admin = User(
-            id=default_admin_id, name=default_admin_name, is_admin=True
-        )
-        session.add(default_admin)
-        session.commit()
+            for initial_quiz_type in INITIAL_QUIZ_TYPES:
+                session.add(
+                    QuizType(
+                        type=initial_quiz_type["type"], emoji=initial_quiz_type["emoji"]
+                    )
+                )
+                print(f"Initial quiz type '{initial_quiz_type}' created.")
 
-        print(f"Default admin user ({default_admin_name}) created.")
+            session.commit()
