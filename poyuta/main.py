@@ -128,8 +128,8 @@ async def anwswer_quiz(
 
         # if the user has already answered the quiz correctly
         # don't let them answer again
-        for answer in user.answers:
-            if answer.quiz_id == quiz.id and answer.is_correct:
+        for user_answer in user.answers:
+            if user_answer.quiz_id == quiz.id and user_answer.is_correct:
                 await interaction.response.send_message(
                     f"You have already answered correctly for today's {quiz_type.name} quiz."
                 )
@@ -155,7 +155,7 @@ async def anwswer_quiz(
 
         # compute answer time in seconds
         answer_time = answer_time - start_quiz_timestamp.timestamp
-        answer_time = answer_time.total_seconds()
+        answer_time = round(answer_time.total_seconds(), 3)
 
     # create the answer object
     user_answer = Answer(
@@ -167,11 +167,11 @@ async def anwswer_quiz(
 
     # Generate a pattern to match with the correct answer
     user_answer_pattern = process_user_input(
-        user_answer.answer, partial_match=False, swap_words=True
+        input_str=answer, partial_match=False, swap_words=True
     )
 
     # If the pattern matches : the answer is correct
-    if re.search(user_answer_pattern, quiz.answer):
+    if re.search(user_answer_pattern, quiz.answer, re.IGNORECASE):
         # Send feedback to the user
         await interaction.response.send_message("✅")
 
@@ -217,7 +217,7 @@ async def my_stats(interaction: discord.Interaction):
 
         quiz_types = session.query(QuizType).all()
         for quiz_type in quiz_types:
-            # get the answers for this user and this quiz type
+
             embed.add_field(
                 name=f"{quiz_type.emoji} {quiz_type.type}", value="", inline=False
             )
@@ -226,11 +226,8 @@ async def my_stats(interaction: discord.Interaction):
             embed = generate_stats_embed_content(
                 session=session,
                 embed=embed,
-                answers=[
-                    answer
-                    for answer in user.answers
-                    if answer.quiz.id_type == quiz_type.id
-                ],
+                user_id = user.id,
+                quiz_type=quiz_type,
             )
 
             # Linebreak unless last quiz type
@@ -300,17 +297,81 @@ async def post_yesterdays_quiz_results():
             # Linebreak
             embed.add_field(name="", value="", inline=False)
 
-            # Top Guesseres TODO
+            medals = [":first_place:", ":second_place:", ":third_place:"]
+            top_faster_answers = (
+                session.query(Answer)
+                .filter(
+                    Answer.quiz_id == yesterday_quiz.id,
+                    Answer.is_correct == True,
+                )
+                .order_by(Answer.answer_time)
+                .limit(3)
+                .all()
+            )
+
+            # Top Guessers
+            top_guessers = "\n".join(
+                [
+                    f"> {medals[i]} <@{answer.user_id}>"
+                    for i, answer in enumerate(top_faster_answers)
+                ]
+            )
             embed.add_field(
                 name="> Top Guessers",
-                value=f"> TBA\n> TBA\n> TBA",
+                value=top_guessers,
                 inline=True,
             )
 
-            # TODO
-            embed.add_field(name="> Time(?)", value="> TBA\n> TBA\n> TBA", inline=True)
-            embed.add_field(name="> Attempts", value="> TBA\n> TBA\n> TBA", inline=True)
-            embed.add_field(name="Most Guessed", value="TBA", inline=False)
+            # Times
+            top_times = "\n".join(
+                [
+                    f"> {answer.answer_time}s"
+                    for i, answer in enumerate(top_faster_answers)
+                ]
+            )
+            embed.add_field(name="> Time", value=top_times, inline=True)
+                
+
+            # Attempts
+            top_attempts = "\n".join(
+                [
+                    f"> {len(answer.user.answers)}"
+                    for i, answer in enumerate(top_faster_answers) if answer.quiz_id == yesterday_quiz.id
+                ]
+            )
+            embed.add_field(name="> Attempts", value=top_attempts, inline=True)
+
+            # Most incorrectly guessed
+            # Count each incorrect answer
+            incorrect_answers = {}
+            for answer in yesterday_quiz.answers:
+                if answer.is_correct:
+                    continue
+
+                regex_pattern = process_user_input(
+                    input_str=answer.answer, partial_match=False, swap_words=True
+                )
+                for key in incorrect_answers.keys():
+                    if re.search(regex_pattern, key, re.IGNORECASE):
+                        incorrect_answers[key] += 1
+                        break
+                else:
+                    incorrect_answers[answer.answer] = 1
+
+            # sort the dict by value
+            incorrect_answers = dict(
+                sorted(incorrect_answers.items(), key=lambda item: item[1], reverse=True)
+            )
+            
+            # top 3 most incorrectly guessed
+            top_3_incorrect = "\n".join(
+                [
+                    f"> {key} ({value} times)"
+                    for i, (key, value) in enumerate(incorrect_answers.items())
+                    if i < 3
+                ]
+            )
+            embed.add_field(name="Most Incorrectly Guessed", value=top_3_incorrect, inline=False)
 
             # Send the message with the view
             # send it on every channels set as quiz channel
@@ -318,9 +379,10 @@ async def post_yesterdays_quiz_results():
                 channel = bot.get_channel(quiz_channel.id_channel)
                 await channel.send(embed=embed)
 
-        # Create a single View
-        view = NewQuizView()
-        await channel.send(view=view)
+        for quiz_channel in session.query(QuizChannels).all():
+            channel = bot.get_channel(quiz_channel.id_channel)
+            view = NewQuizView()
+            await channel.send(view=view)
 
 
 class NewQuizButton(discord.ui.Button):

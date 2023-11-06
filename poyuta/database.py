@@ -86,7 +86,7 @@ class Answer(Base):
     answer = sa.Column(sa.String, nullable=False)
     is_correct = sa.Column(sa.Boolean, nullable=False)
 
-    answer_time = sa.Column(sa.String, nullable=False)
+    answer_time = sa.Column(sa.Float, nullable=False)
 
 
 class UserStartQuizTimestamp(Base):
