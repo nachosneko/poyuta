@@ -457,7 +457,7 @@ def get_user_from_id(
         db_user.pfp = pfp_hash
         session.commit()
 
-    return user
+    return db_user
 
 
 def get_quiz_type_choices(session: Session) -> list[tuple[int, str]]:
