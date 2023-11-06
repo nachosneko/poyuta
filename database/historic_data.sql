@@ -1,5 +1,5 @@
 INSERT INTO users (id, name, pfp, is_admin) VALUES
-(161026455696834560, "rie_takahashi", null, 1);
+(161026455696834560, "EruisKawaii", null, 1);
 
 INSERT INTO quizzes (creator_id, date, clip, answer, id_type) VALUES
 (161026455696834560, '2023-10-21', 'https://files.catbox.moe/1i3hja.mp3', 'Mariya Ise', 2),
