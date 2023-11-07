@@ -96,11 +96,16 @@ async def postquizresults(ctx):
 
 @bot.tree.command(name="answerquiz")
 @app_commands.describe(
-    quiz_type="type of the quiz to answer", answer="your answer for this quiz"
+    quiz_type="type of the quiz to answer",
+    answer="your answer for this quiz",
+    bonus_answer="your answer for the bonus point",
 )
 @app_commands.choices(quiz_type=get_quiz_type_choices(session=bot.session))
 async def anwswer_quiz(
-    interaction: discord.Interaction, quiz_type: app_commands.Choice[int], answer: str
+    interaction: discord.Interaction,
+    quiz_type: app_commands.Choice[int],
+    answer: str,
+    bonus_answer: Optional[str] = None,
 ):
     """guess the seiyuu for the current quiz_type quiz."""
 
@@ -121,19 +126,43 @@ async def anwswer_quiz(
             await interaction.response.send_message(
                 f"No {quiz_type.name} quiz today :disappointed_relieved:"
             )
+            return
 
         user = get_user_from_id(
             session=session, user=interaction.user, add_if_not_exist=True
         )
 
+        has_correct_answer = (
+            session.query(Answer)
+            .filter(
+                Answer.user_id == user.id,
+                Answer.quiz_id == quiz.id,
+                Answer.is_correct,
+            )
+            .first()
+        )
+        has_correct_bonus = (
+            session.query(Answer)
+            .filter(
+                Answer.user_id == user.id,
+                Answer.quiz_id == quiz.id,
+                Answer.is_bonus_point,
+            )
+            .first()
+        )
+
         # if the user has already answered the quiz correctly
         # don't let them answer again
-        for user_answer in user.answers:
-            if user_answer.quiz_id == quiz.id and user_answer.is_correct:
+        if has_correct_answer:
+            if quiz.bonus_answer and not has_correct_bonus:
                 await interaction.response.send_message(
-                    f"You have already answered correctly for today's {quiz_type.name} quiz."
+                    f"You have already answered correctly for today's {quiz_type.name} quiz. But you haven't answered the bonus point yet. Use /answerbonus to answer it."
                 )
                 return
+            await interaction.response.send_message(
+                f"You have already answered correctly for today's {quiz_type.name} quiz."
+            )
+            return
 
         # get the time at which the user clicked the button
         start_quiz_timestamp = (
@@ -149,7 +178,7 @@ async def anwswer_quiz(
         # don't let them answer
         if not start_quiz_timestamp:
             await interaction.response.send_message(
-                f"You haven't started the {quiz_type.name} quiz yet. How do you know the answer? :HMM:"
+                f"You haven't started the {quiz_type.name} quiz yet. How would you know the answer? :HMM:"
             )
             return
 
@@ -157,40 +186,200 @@ async def anwswer_quiz(
         answer_time = answer_time - start_quiz_timestamp.timestamp
         answer_time = round(answer_time.total_seconds(), 3)
 
-    # create the answer object
-    user_answer = Answer(
-        user_id=user.id,
-        quiz_id=quiz.id,
-        answer=answer,
-        answer_time=answer_time,
-    )
+        # create the answer object
+        user_answer = Answer(
+            user_id=user.id,
+            quiz_id=quiz.id,
+            answer=answer,
+            answer_time=answer_time,
+            is_bonus_point=False,
+        )
 
-    # Generate a pattern to match with the correct answer
-    user_answer_pattern = process_user_input(
-        input_str=answer, partial_match=False, swap_words=True
-    )
+        bonus_point_feedback = ""
 
-    # If the pattern matches : the answer is correct
-    if re.search(user_answer_pattern, quiz.answer, re.IGNORECASE):
-        # Send feedback to the user
-        await interaction.response.send_message("✅")
+        if not quiz.bonus_answer:
+            bonus_point_feedback = f"\nThere is no bonus point for today's {quiz_type.name} quiz. No need to fill a bonus answer.\n"
 
-        # Store the user's answer in the Answer table
-        with bot.session as session:
-            user_answer.is_correct = True
-            session.add(user_answer)
+        # if there's a bonus answer, add it to the answer object
+        if bonus_answer:
+            user_answer.bonus_answer = bonus_answer
+
+            user_bonus_answer_pattern = process_user_input(
+                input_str=bonus_answer, partial_match=False, swap_words=True
+            )
+
+            # if the bonus answer matches the correct bonus answer and the user hasn't already answered the bonus point
+            if (
+                not has_correct_bonus
+                and quiz.bonus_answer
+                and re.search(
+                    user_bonus_answer_pattern, quiz.bonus_answer, re.IGNORECASE
+                )
+            ):
+                user_answer.is_bonus_point = True
+                bonus_point_feedback = " (+1 bonus point)"
+
+        # Generate a pattern to match with the correct answer
+        user_answer_pattern = process_user_input(
+            input_str=answer, partial_match=False, swap_words=True
+        )
+
+        # If the pattern matches : the answer is correct
+        if re.search(user_answer_pattern, quiz.answer, re.IGNORECASE):
+            # if they don't have a bonus point yet
+            if not bonus_point_feedback and not has_correct_bonus:
+                bonus_point_feedback = " (but you didn't get the bonus point :disappointed_relieved:, try to get it with /answerbonus)"
+
+            await interaction.response.send_message(
+                f"✅ Correct in {answer_time}s !{bonus_point_feedback}"
+            )
+
+            # Store the user's answer in the Answer table
+            with bot.session as session:
+                user_answer.is_correct = True
+                session.add(user_answer)
+                session.commit()
+
+            return
+
+        # Otherwise, the pattern doesn't match : the answer is incorrect
+        else:
+            # Send feedback to the user
+            if user_answer.is_bonus_point:
+                bonus_point_feedback = " (but somehow +1 bonus point)"
+
+            await interaction.response.send_message(
+                f"❌ Incorrect !{bonus_point_feedback}"
+            )
+
+            # Store the user's answer in the Answer table
+            with bot.session as session:
+                user_answer.is_correct = False
+                session.add(user_answer)
+                session.commit()
+
+            return
+
+
+@bot.tree.command(name="answerbonusquiz")
+@app_commands.describe(
+    quiz_type="type of the quiz to answer",
+    bonus_answer="your answer for the bonus point",
+)
+@app_commands.choices(quiz_type=get_quiz_type_choices(session=bot.session))
+async def answer_bonus_quiz(
+    interaction: discord.Interaction,
+    quiz_type: app_commands.Choice[int],
+    bonus_answer: str,
+):
+    """try to get the bonus point once you have answered the quiz correctly."""
+
+    answer_time = datetime.now()
+
+    # check that he answered correctly first
+    with bot.session as session:
+        current_quiz_date = get_current_quiz_date(
+            daily_quiz_reset_time=DAILY_QUIZ_RESET_TIME
+        )
+
+        # get quiz for this date and type
+        quiz = (
+            session.query(Quiz)
+            .filter(Quiz.id_type == quiz_type.value, Quiz.date == current_quiz_date)
+            .first()
+        )
+        if not quiz:
+            await interaction.response.send_message(
+                f"No {quiz_type.name} quiz today :disappointed_relieved:"
+            )
+            return
+
+        # check quiz has a bonus answer
+        if not quiz.bonus_answer:
+            await interaction.response.send_message(
+                f"There is no bonus point for today's {quiz_type.name} quiz."
+            )
+            return
+
+        user = get_user_from_id(
+            session=session, user=interaction.user, add_if_not_exist=True
+        )
+
+        has_correct_answer = (
+            session.query(Answer)
+            .filter(
+                Answer.user_id == user.id,
+                Answer.quiz_id == quiz.id,
+                Answer.is_correct,
+            )
+            .first()
+        )
+        has_correct_bonus = (
+            session.query(Answer)
+            .filter(
+                Answer.user_id == user.id,
+                Answer.quiz_id == quiz.id,
+                Answer.is_bonus_point,
+            )
+            .first()
+        )
+
+        if not has_correct_answer:
+            await interaction.response.send_message(
+                f"You haven't answered today's {quiz_type.name} quiz yet. Use /answerquiz to answer it before trying to get the bonus point."
+            )
+            return
+
+        # check that the user hasn't already answered the bonus point
+        if has_correct_bonus:
+            await interaction.response.send_message(
+                f"You have already answered the bonus point for today's {quiz_type.name} quiz."
+            )
+            return
+
+        # get the time at which the user clicked the button
+        start_quiz_timestamp = (
+            session.query(UserStartQuizTimestamp)
+            .filter(
+                UserStartQuizTimestamp.user_id == user.id,
+                UserStartQuizTimestamp.quiz_id == quiz.id,
+            )
+            .first()
+        )
+
+        # compute answer time in seconds
+        answer_time = answer_time - start_quiz_timestamp.timestamp
+        answer_time = round(answer_time.total_seconds(), 3)
+
+        new_answer = Answer(
+            user_id=user.id,
+            quiz_id=quiz.id,
+            answer="\\Bonus Answer\\",
+            bonus_answer=bonus_answer,
+            answer_time=0,
+            is_correct=False,
+        )
+
+        user_bonus_answer_pattern = process_user_input(
+            input_str=bonus_answer, partial_match=False, swap_words=True
+        )
+
+        if re.search(user_bonus_answer_pattern, quiz.bonus_answer, re.IGNORECASE):
+            new_answer.is_bonus_point = True
+            session.add(new_answer)
             session.commit()
 
-    # Otherwise, the pattern doesn't match : the answer is incorrect
-    else:
-        # Send feedback to the user
-        await interaction.response.send_message("❌")
-
-        # Store the user's answer in the Answer table
-        with bot.session as session:
-            user_answer.is_correct = False
-            session.add(user_answer)
+            await interaction.response.send_message("✅ Correct ! +1 bonus point !")
+            return
+        else:
+            new_answer.is_bonus_point = False
+            session.add(new_answer)
             session.commit()
+
+            await interaction.response.send_message(
+                "❌ Incorrect ! Still no bonus point for you :disappointed_relieved:"
+            )
+            return
 
 
 @bot.tree.command(name="mystats")
@@ -217,7 +406,6 @@ async def my_stats(interaction: discord.Interaction):
 
         quiz_types = session.query(QuizType).all()
         for quiz_type in quiz_types:
-
             embed.add_field(
                 name=f"{quiz_type.emoji} {quiz_type.type}", value="", inline=False
             )
@@ -226,7 +414,7 @@ async def my_stats(interaction: discord.Interaction):
             embed = generate_stats_embed_content(
                 session=session,
                 embed=embed,
-                user_id = user.id,
+                user_id=user.id,
                 quiz_type=quiz_type,
             )
 
@@ -259,11 +447,20 @@ async def post_yesterdays_quiz_results():
                 color=0xBBE6F3,
             )
 
+            if yesterday_quiz:
+                answer_feedback = f"> Answer : ||`{yesterday_quiz.answer}`||"
+                bonus_feedback = (
+                    f"\n> Bonus answer : ||{yesterday_quiz.bonus_answer}||"
+                    if yesterday_quiz.bonus_answer
+                    else ""
+                )
+                value = f"{answer_feedback}{bonus_feedback}"
+            else:
+                value = "> No quiz took place :disappointed_relieved:"
+
             embed.add_field(
                 name=f"> {quiz_type.emoji} {quiz_type.type}",
-                value=f"> ||{yesterday_quiz.answer}||"
-                if yesterday_quiz
-                else "> No quiz took place :disappointed_relieved:",
+                value=value,
                 inline=True,
             )
             embed.add_field(
@@ -302,7 +499,7 @@ async def post_yesterdays_quiz_results():
                 session.query(Answer)
                 .filter(
                     Answer.quiz_id == yesterday_quiz.id,
-                    Answer.is_correct == True,
+                    Answer.is_correct,
                 )
                 .order_by(Answer.answer_time)
                 .limit(3)
@@ -330,13 +527,13 @@ async def post_yesterdays_quiz_results():
                 ]
             )
             embed.add_field(name="> Time", value=top_times, inline=True)
-                
 
             # Attempts
             top_attempts = "\n".join(
                 [
                     f"> {len(answer.user.answers)}"
-                    for i, answer in enumerate(top_faster_answers) if answer.quiz_id == yesterday_quiz.id
+                    for i, answer in enumerate(top_faster_answers)
+                    if answer.quiz_id == yesterday_quiz.id
                 ]
             )
             embed.add_field(name="> Attempts", value=top_attempts, inline=True)
@@ -360,9 +557,11 @@ async def post_yesterdays_quiz_results():
 
             # sort the dict by value
             incorrect_answers = dict(
-                sorted(incorrect_answers.items(), key=lambda item: item[1], reverse=True)
+                sorted(
+                    incorrect_answers.items(), key=lambda item: item[1], reverse=True
+                )
             )
-            
+
             # top 3 most incorrectly guessed
             top_3_incorrect = "\n".join(
                 [
@@ -371,7 +570,9 @@ async def post_yesterdays_quiz_results():
                     if i < 3
                 ]
             )
-            embed.add_field(name="Most Incorrectly Guessed", value=top_3_incorrect, inline=False)
+            embed.add_field(
+                name="Most Incorrectly Guessed", value=top_3_incorrect, inline=False
+            )
 
             # Send the message with the view
             # send it on every channels set as quiz channel
@@ -462,6 +663,13 @@ class NewQuizButton(discord.ui.Button):
                 inline=True,
             )
 
+            if current_quiz.bonus_answer:
+                embed.add_field(
+                    name="",
+                    value="There is a bonus point for this quiz.",
+                    inline=False,
+                )
+
             await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
@@ -542,12 +750,14 @@ async def unsetchannel(ctx):
     quiz_type="type of the quiz to update",
     new_clip="input new clip for female",
     new_answer="input new seiyuu for female clip",
+    new_bonus_answer="The bonus answer for the quiz",
 )
 async def new_quiz(
     interaction: discord.Interaction,
     quiz_type: app_commands.Choice[int],
     new_clip: str,
     new_answer: str,
+    new_bonus_answer: Optional[str] = None,
 ):
     """*Bot Admin only* - create a new quiz."""
 
@@ -587,6 +797,7 @@ async def new_quiz(
             creator_id=interaction.user.id,
             clip=new_clip,
             answer=new_answer,
+            bonus_answer=new_bonus_answer,
             id_type=quiz_type.value,
             date=new_date,
         )
@@ -648,8 +859,9 @@ async def planned_quizzes(interaction: discord.Interaction):
                     .filter(Quiz.id_type == quiz_type.id, Quiz.date == quiz_date)
                     .first()
                 )
+
                 value = (
-                    f"[{quiz.answer}]({quiz.clip})"
+                    f"[{quiz.answer}]({quiz.clip}){' + ' + quiz.bonus_answer if quiz.bonus_answer else ''}"
                     if quiz
                     else "Nothing planned :disappointed_relieved:"
                 )
@@ -677,6 +889,7 @@ async def planned_quizzes(interaction: discord.Interaction):
     quiz_type="type of the quiz to update",
     new_clip="input new clip for female",
     new_answer="input new seiyuu for female clip",
+    new_bonus_answer="The bonus answer for the quiz (e.g. the anime or the song name)",
 )
 async def update_quiz(
     interaction: discord.Interaction,
@@ -684,6 +897,7 @@ async def update_quiz(
     quiz_type: app_commands.Choice[int],
     new_clip: str,
     new_answer: str,
+    new_bonus_answer: str,
 ):
     """*Bot Admin only* - Update a planned quiz."""
 
@@ -725,6 +939,7 @@ async def update_quiz(
         # Update attributes
         quiz.clip = new_clip
         quiz.answer = new_answer
+        quiz.bonus_answer = new_bonus_answer
 
         # Commit the changes to the database
         session.commit()
