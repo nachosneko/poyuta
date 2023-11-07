@@ -235,12 +235,14 @@ def is_bot_admin(session: Session, user: User):
         Whether the user is a bot admin or not.
     """
 
-    admins = session.query(User).filter(User.is_admin is True).all()
+    admins = session.query(User).filter(User.is_admin).all()
 
     return user.id in [admin.id for admin in admins]
 
 
-def generate_stats_embed_content(session: Session, embed: Embed, user_id: int, quiz_type: Quiz):
+def generate_stats_embed_content(
+    session: Session, embed: Embed, user_id: int, quiz_type: Quiz
+):
     """Generate the stats embed content.
 
     Parameters
@@ -260,9 +262,14 @@ def generate_stats_embed_content(session: Session, embed: Embed, user_id: int, q
         Filled embed.
     """
 
-    with session as session: 
+    with session as session:
         # Get the answers for this type
-        answers = session.query(Answer).join(Quiz).filter(Answer.user_id == user_id, Quiz.id_type == quiz_type.id).all()
+        answers = (
+            session.query(Answer)
+            .join(Quiz)
+            .filter(Answer.user_id == user_id, Quiz.id_type == quiz_type.id)
+            .all()
+        )
 
         nb_unique_quizzes = len(set([answer.quiz_id for answer in answers]))
 
@@ -273,19 +280,29 @@ def generate_stats_embed_content(session: Session, embed: Embed, user_id: int, q
             if nb_unique_quizzes
             else "N/A"
         )
+        nb_bonus_points = len([answer for answer in answers if answer.is_bonus_point])
         embed.add_field(
             name="> :dart: Guess Rate",
-            value=f"> {guess_rate}% ({nb_correct_answers}/{nb_unique_quizzes})",
+            value=f"> {guess_rate}% ({nb_correct_answers}/{nb_unique_quizzes}) + {nb_bonus_points} bonus points",
             inline=True,
         )
 
         # Average Guess Time
         average_guess_time = (
-            round(np.mean([answer.answer_time for answer in answers if answer.is_correct]), 2)
+            round(
+                np.mean(
+                    [answer.answer_time for answer in answers if answer.is_correct]
+                ),
+                2,
+            )
             if answers
             else "N/A"
         )
-        embed.add_field(name="> :clock1: Average Guess Time", value=f"> {average_guess_time}s", inline=True)
+        embed.add_field(
+            name="> :clock1: Average Guess Time",
+            value=f"> {average_guess_time}s",
+            inline=True,
+        )
 
         embed.add_field(name="", value="", inline=False)
 
@@ -311,19 +328,34 @@ def generate_stats_embed_content(session: Session, embed: Embed, user_id: int, q
 
         # Fastest Guesses for this user
         fastest_answers = (
-            session.query(Answer).join(Quiz)
-            .filter(Answer.user_id == answers[0].user_id, Quiz.id_type == quiz_type.id, Answer.is_correct)
+            session.query(Answer)
+            .join(Quiz)
+            .filter(
+                Answer.user_id == answers[0].user_id,
+                Quiz.id_type == quiz_type.id,
+                Answer.is_correct,
+            )
             .order_by(Answer.answer_time)
             .limit(3)
             .all()
         )
-        print(fastest_answers)
 
         medals = [":first_place:", ":second_place:", ":third_place:"]
 
+        nb_attempts = []
+        for fastest_answer in fastest_answers:
+            nb_attempts.append(
+                session.query(Answer)
+                .filter(
+                    Answer.user_id == fastest_answer.user_id,
+                    Answer.quiz_id == fastest_answer.quiz_id,
+                )
+                .count()
+            )
+
         fastest_answers = "\n\n".join(
             [
-                f"{medals[i]} | **{answer.answer_time}s** : {answer.answer} in {'TODO'} attempts on {answer.quiz.date}"
+                f"{medals[i]} | **{answer.answer_time}s** : {answer.answer} in {nb_attempts[i]} attempts on {answer.quiz.date}"
                 for i, answer in enumerate(fastest_answers)
             ]
         )
@@ -447,7 +479,6 @@ def get_user_from_id(
 
     # update pfp if it changed
     if db_user.pfp != pfp_hash:
-        print("updating pfp")
         db_user.pfp = pfp_hash
         session.commit()
 

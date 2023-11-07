@@ -62,9 +62,11 @@ class Quiz(Base):
     creator_id = sa.Column(sa.Integer, sa.ForeignKey(User.id), nullable=False)
     creator = relationship(User, backref="quizzes_created")
 
-    date = sa.Column(sa.Date, nullable=False)
     clip = sa.Column(sa.String, nullable=False)
     answer = sa.Column(sa.String, nullable=False)
+    bonus_answer = sa.Column(sa.String, nullable=True)
+
+    date = sa.Column(sa.Date, nullable=False)
     id_type = sa.Column(sa.Integer, sa.ForeignKey(QuizType.id))
     type = relationship(QuizType, backref="quizzes")
 
@@ -85,6 +87,9 @@ class Answer(Base):
 
     answer = sa.Column(sa.String, nullable=False)
     is_correct = sa.Column(sa.Boolean, nullable=False)
+
+    bonus_answer = sa.Column(sa.String, nullable=True)
+    is_bonus_point = sa.Column(sa.Boolean, nullable=False)
 
     answer_time = sa.Column(sa.Float, nullable=False)
 

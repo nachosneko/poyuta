@@ -35,4 +35,6 @@ INSERT INTO quizzes (creator_id, date, clip, answer, id_type) VALUES
 (161026455696834560, '2023-11-05', 'https://files.catbox.moe/znsgcl.mp3', 'Kenshou Ono', 1),
 (161026455696834560, '2023-11-05', 'https://files.catbox.moe/jmo0ll.mp3', 'You Taichi', 2),
 (161026455696834560, '2023-11-06', 'https://files.catbox.moe/d6h8f1.mp3', 'Kazuyuki Okitsu', 1),
-(161026455696834560, '2023-11-06', 'https://files.catbox.moe/rb30rq.mp3', 'Sora Amamiya', 2);
+(161026455696834560, '2023-11-06', 'https://files.catbox.moe/rb30rq.mp3', 'Sora Amamiya', 2),
+(161026455696834560, '2023-11-07', 'https://files.catbox.moe/21pxct.mp3', 'Makoto Furukawa', 1),
+(161026455696834560, '2023-11-07', 'https://files.catbox.moe/znbc9a.mp3', 'Chiwa Saitou', 2);
