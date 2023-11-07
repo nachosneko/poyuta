@@ -75,6 +75,9 @@ async def on_ready():
     try:
         synced = await bot.tree.sync()
         print(f"synced {len(synced)} command(s)")
+
+        for command in synced:
+            print(f"{command.name} synced")
     except Exception as e:
         print(e)
 
@@ -94,16 +97,33 @@ async def postquizresults(ctx):
     await post_yesterdays_quiz_results()
 
 
-@bot.tree.command(name="answerquiz")
-@app_commands.describe(
-    quiz_type="type of the quiz to answer",
-    answer="your answer for this quiz",
-    bonus_answer="your answer for the bonus point",
-)
-@app_commands.choices(quiz_type=get_quiz_type_choices(session=bot.session))
-async def anwswer_quiz(
+# Generate a command for each quiz type
+with bot.session as session:
+    quiz_types = session.query(QuizType).all()
+
+    for quiz_type in quiz_types:
+        command_name = f"{quiz_type.type.lower().replace(' ', '')}"
+
+        @bot.tree.command(name=command_name)
+        @app_commands.describe(
+            answer="your answer for this quiz",
+            bonus_answer="your answer for the bonus point",
+        )
+        # Add other decorators as needed
+        async def dynamic_answer_quiz(
+            interaction: discord.Interaction,
+            answer: str,
+            bonus_answer: Optional[str] = None,
+        ):
+            await answer_quiz_type(
+                interaction, quiz_type.id, quiz_type.type, answer, bonus_answer
+            )
+
+
+async def answer_quiz_type(
     interaction: discord.Interaction,
-    quiz_type: app_commands.Choice[int],
+    quiz_type_id: int,
+    quiz_type_name: str,
     answer: str,
     bonus_answer: Optional[str] = None,
 ):
@@ -119,7 +139,7 @@ async def anwswer_quiz(
         # get quiz for this date and type
         quiz = (
             session.query(Quiz)
-            .filter(Quiz.id_type == quiz_type.value, Quiz.date == current_quiz_date)
+            .filter(Quiz.id_type == quiz_type_id, Quiz.date == current_quiz_date)
             .first()
         )
         if not quiz:
@@ -156,11 +176,11 @@ async def anwswer_quiz(
         if has_correct_answer:
             if quiz.bonus_answer and not has_correct_bonus:
                 await interaction.response.send_message(
-                    f"You have already answered correctly for today's {quiz_type.name} quiz. But you haven't answered the bonus point yet. Use /answerbonus to answer it."
+                    f"You have already answered correctly for today's {quiz_type_name} quiz. But you haven't answered the bonus point yet. Use /bonus to answer it."
                 )
                 return
             await interaction.response.send_message(
-                f"You have already answered correctly for today's {quiz_type.name} quiz."
+                f"You have already answered correctly for today's {quiz_type_name} quiz."
             )
             return
 
@@ -178,7 +198,7 @@ async def anwswer_quiz(
         # don't let them answer
         if not start_quiz_timestamp:
             await interaction.response.send_message(
-                f"You haven't started the {quiz_type.name} quiz yet. How would you know the answer? :HMM:"
+                f"You haven't started the {quiz_type_name} quiz yet. How would you know the answer? :HMM:"
             )
             return
 
@@ -198,7 +218,7 @@ async def anwswer_quiz(
         bonus_point_feedback = ""
 
         if not quiz.bonus_answer:
-            bonus_point_feedback = f"\nThere is no bonus point for today's {quiz_type.name} quiz. No need to fill a bonus answer.\n"
+            bonus_point_feedback = f"\nThere is no bonus point for today's {quiz_type_name} quiz. No need to fill a bonus answer.\n"
 
         # if there's a bonus answer, add it to the answer object
         if bonus_answer:
@@ -228,7 +248,7 @@ async def anwswer_quiz(
         if re.search(user_answer_pattern, quiz.answer, re.IGNORECASE):
             # if they don't have a bonus point yet
             if not bonus_point_feedback and not has_correct_bonus:
-                bonus_point_feedback = " (but you didn't get the bonus point :disappointed_relieved:, try to get it with /answerbonus)"
+                bonus_point_feedback = " (but you didn't get the bonus point :disappointed_relieved:, try to get it with /bonus)"
 
             await interaction.response.send_message(
                 f"✅ Correct in {answer_time}s !{bonus_point_feedback}"
@@ -261,7 +281,7 @@ async def anwswer_quiz(
             return
 
 
-@bot.tree.command(name="answerbonusquiz")
+@bot.tree.command(name="bonus")
 @app_commands.describe(
     quiz_type="type of the quiz to answer",
     bonus_answer="your answer for the bonus point",
