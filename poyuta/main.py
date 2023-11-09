@@ -267,7 +267,7 @@ async def answer_quiz_type(
         if not start_quiz_timestamp:
             embed.add_field(
                 name="Invalid",
-                value=f"You haven't started the {quiz_type_name} quiz yet. How would you know the answer? :HMM:",
+                value=f"You haven't started the {quiz_type_name} quiz yet. How would you know the answer? :HMM~1:",
                 inline=True,
             )
 
@@ -905,9 +905,12 @@ async def post_yesterdays_quiz_results():
                 channel = bot.get_channel(quiz_channel.id_channel)
                 await channel.send(embed=embed)
 
+        print(current_quiz_date)
+        print(yesterday)
+
         for quiz_channel in session.query(QuizChannels).all():
             channel = bot.get_channel(quiz_channel.id_channel)
-            view = NewQuizView()
+            view = NewQuizView(current_quiz_date)
             await channel.send(view=view)
 
 
@@ -917,9 +920,7 @@ class NewQuizButton(discord.ui.Button):
     def __init__(
         self,
         quiz_type: QuizType,
-        new_quiz_date: date = get_current_quiz_date(
-            daily_quiz_reset_time=DAILY_QUIZ_RESET_TIME
-        ),
+        new_quiz_date: date,
     ):
         super().__init__(
             label=f"Play today's {quiz_type.type} Quiz",
@@ -999,12 +1000,12 @@ class NewQuizButton(discord.ui.Button):
 
 
 class NewQuizView(discord.ui.View):
-    def __init__(self):
+    def __init__(self, new_quiz_date):
         super().__init__()
 
         with bot.session as session:
             for quiz_type in session.query(QuizType).all():
-                button = NewQuizButton(quiz_type=quiz_type)
+                button = NewQuizButton(quiz_type=quiz_type, new_quiz_date=new_quiz_date)
                 self.add_item(button)
 
 
