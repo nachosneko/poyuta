@@ -1,4 +1,6 @@
 INSERT INTO users (id, name, pfp, is_admin) VALUES
+(161026455696834560, "xsardine", null, 1),
+(161026455696834560, "husa", null, 1),
 (161026455696834560, "EruisKawaii", null, 1);
 
 INSERT INTO quizzes (creator_id, date, clip, answer, id_type) VALUES

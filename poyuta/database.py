@@ -144,7 +144,7 @@ def initialize_database(
 
             if use_historic_data:
                 # get the sql script
-                with open(DATABASE_PATH / "historic_data.sql") as f:
+                with open(DATABASE_PATH / "historic_quiz_data.sql") as f:
                     sql_script = f.read()
 
                     # Split the script into individual statements

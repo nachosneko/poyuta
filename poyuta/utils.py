@@ -295,7 +295,7 @@ def generate_stats_embed_content(
                 ),
                 2,
             )
-            if answers
+            if [answer.answer_time for answer in answers if answer.is_correct]
             else "N/A"
         )
         embed.add_field(
@@ -331,7 +331,7 @@ def generate_stats_embed_content(
             session.query(Answer)
             .join(Quiz)
             .filter(
-                Answer.user_id == answers[0].user_id,
+                Answer.user_id == user_id,
                 Quiz.id_type == quiz_type.id,
                 Answer.is_correct,
             )
@@ -458,6 +458,13 @@ def get_user_from_id(
     -------
     User
         User from the database.
+
+    Notes
+    -----
+    This function first tries to get the user from the database using their Discord ID. If the user is not found and
+    `add_if_not_exist` is True, a new user is created in the database with the given ID, name, and profile picture hash.
+    If the user is found or added, their profile picture hash is updated if it has changed since the last time they were
+    retrieved from the database.
     """
 
     # extract pfp hash from discord pfp url
@@ -486,17 +493,21 @@ def get_user_from_id(
 
 
 def get_quiz_type_choices(session: Session) -> list[tuple[int, str]]:
-    """Get the quiz type choices.
+    """
+    Get the quiz type choices.
+
+    This function queries the database session to get a list of distinct quiz types,
+    and returns a list of tuples containing the quiz type ID and name.
 
     Parameters
     ----------
     session : Session
-        Database session.
+        The database session.
 
     Returns
     -------
     list[tuple[int, str]]
-        List of quiz type choices.
+        A list of tuples containing the quiz type ID and name.
     """
 
     quiz_types = session.query(QuizType).distinct().all()
