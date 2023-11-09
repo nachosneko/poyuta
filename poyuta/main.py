@@ -10,6 +10,10 @@ from discord.ext import commands
 import random
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from sqlalchemy import case, func
+from sqlalchemy.orm import joinedload
+
+
 # Database
 from poyuta.database import (
     UserStartQuizTimestamp,
@@ -602,6 +606,100 @@ async def my_stats(ctx: commands.Context):
             # Linebreak unless last quiz type
             if quiz_type != quiz_types[-1]:
                 embed.add_field(name="\u200b", value="", inline=False)
+
+    await ctx.send(embed=embed)
+
+
+@bot.command(name="leaderboard")
+# Add other decorators as needed
+async def my_stats(ctx: commands.Context):
+    """
+    Display the leaderboards.
+
+    Examples
+    ---------
+    !leaderboard
+    """
+
+    with bot.session as session:
+        # create the embed object
+        embed = discord.Embed(title="")
+
+        # get top 10 highest scorers for each quiz type
+        quiz_types = session.query(QuizType).all()
+        for quiz_type in quiz_types:
+            # group by user_id and count is_correct as 1 and is_bonus_point as 0.5
+            top_10 = (
+                session.query(
+                    Answer.user_id,
+                    func.sum(
+                        case(
+                            (Answer.is_correct, 1),
+                            (Answer.is_bonus_point, 0.5),
+                            else_=0,
+                        )
+                    ),
+                )
+                .join(Quiz)
+                .filter(Quiz.id_type == quiz_type.id)
+                .group_by(Answer.user_id)
+                .order_by(
+                    func.sum(
+                        case(
+                            (Answer.is_correct, 1),
+                            (Answer.is_bonus_point, 0.5),
+                            else_=0,
+                        )
+                    ).desc()
+                )
+                .limit(10)
+                .all()
+            )
+
+            medals = [":first_place:", ":second_place:", ":third_place:"]
+            value = ""
+            for i, top in enumerate(top_10):
+                rank = f"{medals[i]} " if i < 3 else f"#{i + 1}: "
+                value += f"> {rank} <@{top[0]}>: {top[1]} points\n"
+
+            embed.add_field(
+                name=f"> {quiz_type.emoji} {quiz_type.type}", value=value, inline=True
+            )
+
+        # global leaderboard
+        top_10 = (
+            session.query(
+                Answer.user_id,
+                func.sum(
+                    case(
+                        (Answer.is_correct, 1),
+                        (Answer.is_bonus_point, 0.5),
+                        else_=0,
+                    )
+                ),
+            )
+            .group_by(Answer.user_id)
+            .order_by(
+                func.sum(
+                    case(
+                        (Answer.is_correct, 1),
+                        (Answer.is_bonus_point, 0.5),
+                        else_=0,
+                    )
+                ).desc()
+            )
+            .limit(10)
+            .all()
+        )
+
+        medals = [":first_place:", ":second_place:", ":third_place:"]
+        value = ""
+
+        for i, top in enumerate(top_10):
+            rank = f"{medals[i]} " if i < 3 else f"#{i + 1}: "
+            value += f"> {rank} <@{top[0]}>: {top[1]} points\n"
+
+        embed.add_field(name="> Global Leaderboard", value=value, inline=False)
 
     await ctx.send(embed=embed)
 
