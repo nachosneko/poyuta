@@ -92,44 +92,104 @@ async def on_ready():
     scheduler.start()
 
 
-@bot.command()  # for quick debugging
-async def postquizresults(ctx):
-    await post_yesterdays_quiz_results()
+# --- Answering seiyuu --- #
 
 
-# Generate a command for each quiz type
-with bot.session as session:
-    quiz_types = session.query(QuizType).all()
+@bot.command(name="male")
+# Add other decorators as needed
+async def male_answer_quiz(
+    ctx: commands.Context,
+    *answer: str,
+):
+    """
+    Answer today's male seiyuu quiz.
+    Please use ||spoiler tags|| to hide your answer.
 
-    for quiz_type in quiz_types:
-        command_name = f"{quiz_type.type.lower().replace(' ', '')}"
+    Arguments
+    ---------
+    answer : str
+        The answer to the quiz.
 
-        @bot.tree.command(name=command_name)
-        @app_commands.describe(
-            answer="your answer for this quiz",
-            bonus_answer="your answer for the bonus point",
-        )
-        # Add other decorators as needed
-        async def dynamic_answer_quiz(
-            interaction: discord.Interaction,
-            answer: str,
-            bonus_answer: Optional[str] = None,
-        ):
-            await answer_quiz_type(
-                interaction, quiz_type.id, quiz_type.type, answer, bonus_answer
-            )
+    Examples
+    ---------
+    !male ||your answer||
+    !male ||answer||
+    """
+    # edit their message to hide the answer
+    await ctx.message.delete()
+
+    # join the answer
+    answer = " ".join(answer)
+
+    await answer_quiz_type(
+        ctx=ctx, quiz_type_id=1, quiz_type_name="Male", answer=answer
+    )
+
+
+@bot.command(name="female")
+# Add other decorators as needed
+async def female_answer_quiz(ctx: commands.Context):
+    """
+    Answer today's female seiyuu quiz.
+    Please use ||spoiler tags|| to hide your answer.
+
+    Arguments
+    ---------
+    answer : str
+        The answer to the quiz.
+
+    Examples
+    ---------
+    !female ||your answer||
+    !female ||answer||
+    """
+
+    answer = ctx.message.content.split(" ", 1)[1:]
+    print(answer)
+
+    # edit their message to hide the answer
+    await ctx.message.delete()
+
+    # join the answer
+    answer = " ".join(answer)
+
+    await answer_quiz_type(
+        ctx=ctx, quiz_type_id=2, quiz_type_name="Female", answer=answer
+    )
 
 
 async def answer_quiz_type(
-    interaction: discord.Interaction,
+    ctx: commands.Context,
     quiz_type_id: int,
     quiz_type_name: str,
     answer: str,
-    bonus_answer: Optional[str] = None,
 ):
     """guess the seiyuu for the current quiz_type quiz."""
 
     answer_time = datetime.now()
+
+    # remove spoiler tags if present
+    answer = re.sub(r"\|\|", "", answer)
+
+    embed = discord.Embed(
+        title=f"{quiz_type_name} Quiz Results",
+        color=0xBBE6F3,
+    )
+
+    embed.set_author(
+        name=ctx.author.name,
+        icon_url=ctx.author.avatar.url,
+    )
+
+    if not answer:
+        embed.add_field(
+            name="Invalid",
+            value=f"Please provide an answer : `!{quiz_type_name.lower()} ||your answer||`",
+            inline=True,
+        )
+
+        await ctx.send(embed=embed)
+        return
 
     with bot.session as session:
         current_quiz_date = get_current_quiz_date(
@@ -143,14 +203,10 @@ async def answer_quiz_type(
             .first()
         )
         if not quiz:
-            await interaction.response.send_message(
-                f"No {quiz_type.name} quiz today :disappointed_relieved:"
-            )
+            await ctx.send(f"No {quiz_type_name} quiz today :disappointed_relieved:")
             return
 
-        user = get_user_from_id(
-            session=session, user=interaction.user, add_if_not_exist=True
-        )
+        user = get_user_from_id(session=session, user=ctx.author, add_if_not_exist=True)
 
         has_correct_answer = (
             session.query(Answer)
@@ -175,13 +231,21 @@ async def answer_quiz_type(
         # don't let them answer again
         if has_correct_answer:
             if quiz.bonus_answer and not has_correct_bonus:
-                await interaction.response.send_message(
-                    f"You have already answered correctly for today's {quiz_type_name} quiz. But you haven't answered the bonus point yet. Use /bonus to answer it."
+                embed.add_field(
+                    name="Invalid",
+                    value=f"You have already answered correctly for today's {quiz_type_name} quiz.\nBut you haven't answered the bonus anime point yet. Use `!{quiz_type_name.lower()}anime ||your answer||` to answer it.",
+                    inline=True,
                 )
+
+                await ctx.send(embed=embed)
                 return
-            await interaction.response.send_message(
-                f"You have already answered correctly for today's {quiz_type_name} quiz."
+
+            embed.add_field(
+                name="Invalid",
+                value=f"You have already answered correctly for today's {quiz_type_name} quiz.",
+                inline=True,
             )
+            await ctx.send(embed=embed)
             return
 
         # get the time at which the user clicked the button
@@ -197,9 +261,13 @@ async def answer_quiz_type(
         # if the user hasn't clicked the button yet
         # don't let them answer
         if not start_quiz_timestamp:
-            await interaction.response.send_message(
-                f"You haven't started the {quiz_type_name} quiz yet. How would you know the answer? :HMM:"
+            embed.add_field(
+                name="Invalid",
+                value=f"You haven't started the {quiz_type_name} quiz yet. How would you know the answer? :HMM:",
+                inline=True,
             )
+
+            await ctx.send(embed=embed)
             return
 
         # compute answer time in seconds
@@ -215,30 +283,6 @@ async def answer_quiz_type(
             is_bonus_point=False,
         )
 
-        bonus_point_feedback = ""
-
-        if not quiz.bonus_answer:
-            bonus_point_feedback = f"\nThere is no bonus point for today's {quiz_type_name} quiz. No need to fill a bonus answer.\n"
-
-        # if there's a bonus answer, add it to the answer object
-        if bonus_answer:
-            user_answer.bonus_answer = bonus_answer
-
-            user_bonus_answer_pattern = process_user_input(
-                input_str=bonus_answer, partial_match=False, swap_words=True
-            )
-
-            # if the bonus answer matches the correct bonus answer and the user hasn't already answered the bonus point
-            if (
-                not has_correct_bonus
-                and quiz.bonus_answer
-                and re.search(
-                    user_bonus_answer_pattern, quiz.bonus_answer, re.IGNORECASE
-                )
-            ):
-                user_answer.is_bonus_point = True
-                bonus_point_feedback = " (+1 bonus point)"
-
         # Generate a pattern to match with the correct answer
         user_answer_pattern = process_user_input(
             input_str=answer, partial_match=False, swap_words=True
@@ -247,11 +291,15 @@ async def answer_quiz_type(
         # If the pattern matches : the answer is correct
         if re.search(user_answer_pattern, quiz.answer, re.IGNORECASE):
             # if they don't have a bonus point yet
-            if not bonus_point_feedback and not has_correct_bonus:
-                bonus_point_feedback = " (but you didn't get the bonus point :disappointed_relieved:, try to get it with /bonus)"
+            if not has_correct_bonus and quiz.bonus_answer:
+                bonus_point_feedback = f" (you can also try to get the bonus point using `!{quiz_type_name.lower()}anime ||your answer||`)"
+            else:
+                bonus_point_feedback = ""
 
-            await interaction.response.send_message(
-                f"✅ Correct in {answer_time}s !{bonus_point_feedback}"
+            embed.add_field(
+                name="Answer",
+                value=f"✅ Correct in {answer_time}s !{bonus_point_feedback}",
+                inline=True,
             )
 
             # Store the user's answer in the Answer table
@@ -260,16 +308,17 @@ async def answer_quiz_type(
                 session.add(user_answer)
                 session.commit()
 
+            # send the embed
+            await ctx.send(embed=embed)
+
             return
 
         # Otherwise, the pattern doesn't match : the answer is incorrect
         else:
-            # Send feedback to the user
-            if user_answer.is_bonus_point:
-                bonus_point_feedback = " (but somehow +1 bonus point)"
-
-            await interaction.response.send_message(
-                f"❌ Incorrect !{bonus_point_feedback}"
+            embed.add_field(
+                name="Answer",
+                value="❌ Incorrect !",
+                inline=True,
             )
 
             # Store the user's answer in the Answer table
@@ -278,23 +327,110 @@ async def answer_quiz_type(
                 session.add(user_answer)
                 session.commit()
 
+            await ctx.send(embed=embed)
+
             return
 
 
-@bot.tree.command(name="bonus")
-@app_commands.describe(
-    quiz_type="type of the quiz to answer",
-    bonus_answer="your answer for the bonus point",
-)
-@app_commands.choices(quiz_type=get_quiz_type_choices(session=bot.session))
-async def answer_bonus_quiz(
-    interaction: discord.Interaction,
-    quiz_type: app_commands.Choice[int],
-    bonus_answer: str,
+# --- Answering anime --- #
+
+
+@bot.command(name="maleanime")
+# Add other decorators as needed
+async def male_bonus_answer_quiz(
+    ctx: commands.Context,
+    *answer: str,
 ):
-    """try to get the bonus point once you have answered the quiz correctly."""
+    """
+    Answer today's male seiyuu bonus anime quiz.
+    Please use ||spoiler tags|| to hide your answer.
+
+    Arguments
+    ---------
+    answer : str
+        The answer to the quiz.
+
+    Examples
+    ---------
+    !maleanime ||your answer||
+    !maleanime ||answer||
+    """
+
+    # edit their message to hide the answer
+    await ctx.message.delete()
+
+    # join the answer
+    answer = " ".join(answer)
+
+    await answer_bonus_quiz(
+        ctx=ctx, quiz_type_id=1, quiz_type_name="Male", answer=answer
+    )
+
+
+@bot.command(name="femaleanime")
+# Add other decorators as needed
+async def female_bonus_answer_quiz(
+    ctx: commands.Context,
+    *answer: str,
+):
+    """
+    Answer today's female seiyuu bonus anime quiz.
+    Please use ||spoiler tags|| to hide your answer.
+
+    Arguments
+    ---------
+    answer : str
+        The answer to the quiz.
+
+    Examples
+    ---------
+    !femaleanime ||your answer||
+    !femaleanime ||answer||
+    """
+
+    # edit their message to hide the answer
+    await ctx.message.delete()
+
+    # join the answer
+    answer = " ".join(answer)
+
+    await answer_bonus_quiz(
+        ctx=ctx, quiz_type_id=2, quiz_type_name="Female", answer=answer
+    )
+
+
+async def answer_bonus_quiz(
+    ctx: commands.Context,
+    quiz_type_id: int,
+    quiz_type_name: str,
+    answer: str,
+):
+    """try to get the bonus anime point once you have answered the quiz correctly."""
 
     answer_time = datetime.now()
+
+    # remove spoiler tags if present
+    answer = re.sub(r"\|\|", "", answer)
+
+    embed = discord.Embed(
+        title=f"{quiz_type_name} Quiz Results",
+        color=0xBBE6F3,
+    )
+
+    embed.set_author(
+        name=ctx.author.name,
+        icon_url=ctx.author.avatar.url,
+    )
+
+    if not answer:
+        embed.add_field(
+            name="Invalid",
+            value=f"Please provide an answer : `!{quiz_type_name.lower()} ||your answer||`",
+            inline=True,
+        )
+
+        await ctx.send(embed=embed)
+        return
 
     # check that he answered correctly first
     with bot.session as session:
@@ -305,25 +441,31 @@ async def answer_bonus_quiz(
         # get quiz for this date and type
         quiz = (
             session.query(Quiz)
-            .filter(Quiz.id_type == quiz_type.value, Quiz.date == current_quiz_date)
+            .filter(Quiz.id_type == quiz_type_id, Quiz.date == current_quiz_date)
             .first()
         )
         if not quiz:
-            await interaction.response.send_message(
-                f"No {quiz_type.name} quiz today :disappointed_relieved:"
+            embed.add_field(
+                name="Invalid",
+                value=f"No {quiz_type_name} quiz today :disappointed_relieved:",
+                inline=True,
             )
+
+            await ctx.send(embed=embed)
             return
 
         # check quiz has a bonus answer
         if not quiz.bonus_answer:
-            await interaction.response.send_message(
-                f"There is no bonus point for today's {quiz_type.name} quiz."
+            embed.add_field(
+                name="Invalid",
+                value=f"There is no bonus anime point for today's {quiz_type_name} quiz.",
+                inline=True,
             )
+
+            await ctx.send(embed=embed)
             return
 
-        user = get_user_from_id(
-            session=session, user=interaction.user, add_if_not_exist=True
-        )
+        user = get_user_from_id(session=session, user=ctx.author, add_if_not_exist=True)
 
         has_correct_answer = (
             session.query(Answer)
@@ -345,16 +487,23 @@ async def answer_bonus_quiz(
         )
 
         if not has_correct_answer:
-            await interaction.response.send_message(
-                f"You haven't answered today's {quiz_type.name} quiz yet. Use /answerquiz to answer it before trying to get the bonus point."
+            embed.add_field(
+                name="Invalid",
+                value=f"You haven't answered correctly for today's {quiz_type_name} seiyuu quiz.\nUse `!{quiz_type_name.lower()} ||your answer||` to answer before trying out the bonus.",
+                inline=True,
             )
+
             return
 
         # check that the user hasn't already answered the bonus point
         if has_correct_bonus:
-            await interaction.response.send_message(
-                f"You have already answered the bonus point for today's {quiz_type.name} quiz."
+            embed.add_field(
+                name="Invalid",
+                value=f"You have already answered the bonus anime point for today's {quiz_type_name} quiz.",
+                inline=True,
             )
+
+            await ctx.send(embed=embed)
             return
 
         # get the time at which the user clicked the button
@@ -375,13 +524,13 @@ async def answer_bonus_quiz(
             user_id=user.id,
             quiz_id=quiz.id,
             answer="\\Bonus Answer\\",
-            bonus_answer=bonus_answer,
-            answer_time=0,
+            bonus_answer=answer,
+            answer_time=answer_time,
             is_correct=False,
         )
 
         user_bonus_answer_pattern = process_user_input(
-            input_str=bonus_answer, partial_match=False, swap_words=True
+            input_str=answer, partial_match=False, swap_words=True
         )
 
         if re.search(user_bonus_answer_pattern, quiz.bonus_answer, re.IGNORECASE):
@@ -389,40 +538,52 @@ async def answer_bonus_quiz(
             session.add(new_answer)
             session.commit()
 
-            await interaction.response.send_message("✅ Correct ! +1 bonus point !")
+            embed.add_field(
+                name="Answer",
+                value=f"✅ Correct in {answer_time}s ! +1 bonus anime point !",
+                inline=True,
+            )
+
+            await ctx.send(embed=embed)
             return
         else:
             new_answer.is_bonus_point = False
             session.add(new_answer)
             session.commit()
 
-            await interaction.response.send_message(
-                "❌ Incorrect ! Still no bonus point for you :disappointed_relieved:"
+            embed.add_field(
+                name="Answer",
+                value="❌ Incorrect ! Still no bonus anime point for you :disappointed_relieved:",
+                inline=True,
             )
+            await ctx.send(embed=embed)
             return
 
 
-@bot.tree.command(name="mystats")
-async def my_stats(interaction: discord.Interaction):
-    """get your stats."""
+@bot.command(name="mystats")
+# Add other decorators as needed
+async def my_stats(ctx: commands.Context):
+    """
+    Get your stats.
+
+    Examples
+    ---------
+    !mystats
+    """
 
     with bot.session as session:
         # get the user
-        user = get_user_from_id(
-            session=session, user=interaction.user, add_if_not_exist=True
-        )
+        user = get_user_from_id(session=session, user=ctx.author, add_if_not_exist=True)
 
         if not user:
-            await interaction.response.send_message("You have not played yet.")
+            await ctx.send(f"{ctx.author.mention} You don't have any stats yet.")
             return
 
         # create the embed object
         embed = discord.Embed(title="")
 
         # set the author
-        embed.set_author(
-            name=interaction.user.name, icon_url=interaction.user.avatar.url
-        )
+        embed.set_author(name=ctx.author.name, icon_url=ctx.author.avatar.url)
 
         quiz_types = session.query(QuizType).all()
         for quiz_type in quiz_types:
@@ -442,7 +603,7 @@ async def my_stats(interaction: discord.Interaction):
             if quiz_type != quiz_types[-1]:
                 embed.add_field(name="\u200b", value="", inline=False)
 
-    await interaction.response.send_message(embed=embed)
+    await ctx.send(embed=embed)
 
 
 @bot.event
@@ -468,7 +629,7 @@ async def post_yesterdays_quiz_results():
             )
 
             if yesterday_quiz:
-                answer_feedback = f"> Answer : ||`{yesterday_quiz.answer}`||"
+                answer_feedback = f"> Answer : ||{yesterday_quiz.answer}||"
                 bonus_feedback = (
                     f"\n> Bonus answer : ||{yesterday_quiz.bonus_answer}||"
                     if yesterday_quiz.bonus_answer
@@ -563,6 +724,9 @@ async def post_yesterdays_quiz_results():
             incorrect_answers = {}
             for answer in yesterday_quiz.answers:
                 if answer.is_correct:
+                    continue
+
+                if answer.answer == "\\Bonus Answer\\":
                     continue
 
                 regex_pattern = process_user_input(
@@ -686,7 +850,7 @@ class NewQuizButton(discord.ui.Button):
             if current_quiz.bonus_answer:
                 embed.add_field(
                     name="",
-                    value="There is a bonus point for this quiz.",
+                    value=f"There is a bonus anime point for this quiz. Try `!{self.quiz_type.type.lower()}anime ||your answer||` to get it once you guessed the seiyuu.",
                     inline=False,
                 )
 
@@ -709,7 +873,7 @@ class NewQuizView(discord.ui.View):
 @commands.check(lambda ctx: is_server_admin(ctx, session=bot.session))
 @bot.command()
 async def setchannel(ctx):
-    """Set the current channel as the quiz main channel for this server."""
+    """*Server Admin only* - Set the current channel as the quiz main channel for this server."""
 
     with bot.session as session:
         # check if the channel is already set on this server
@@ -740,7 +904,7 @@ async def setchannel(ctx):
 @commands.check(lambda ctx: is_server_admin(ctx, session=bot.session))
 @bot.command()
 async def unsetchannel(ctx):
-    """Unset the current channel as the quiz main channel for this server."""
+    """*Server Admin only* - Unset the current channel as the quiz main channel for this server."""
 
     with bot.session as session:
         # check if the channel is already set on this server
@@ -764,13 +928,20 @@ async def unsetchannel(ctx):
 # --- BOT ADMIN COMMANDS --- #
 
 
+@commands.check(lambda ctx: is_bot_admin(session=bot.session, user=ctx.author))
+@bot.command()  # for quick debugging
+async def postquizresults(ctx):
+    """*Bot Admin only* Force the bot to post yesterday's quiz results."""
+    await post_yesterdays_quiz_results()
+
+
 @bot.tree.command(name="newquiz")
 @app_commands.choices(quiz_type=get_quiz_type_choices(session=bot.session))
 @app_commands.describe(
     quiz_type="type of the quiz to update",
     new_clip="input new clip for female",
     new_answer="input new seiyuu for female clip",
-    new_bonus_answer="The bonus answer for the quiz",
+    new_bonus_answer="The bonus anime answer for the quiz",
 )
 async def new_quiz(
     interaction: discord.Interaction,
@@ -909,7 +1080,7 @@ async def planned_quizzes(interaction: discord.Interaction):
     quiz_type="type of the quiz to update",
     new_clip="input new clip for female",
     new_answer="input new seiyuu for female clip",
-    new_bonus_answer="The bonus answer for the quiz (e.g. the anime or the song name)",
+    new_bonus_answer="The bonus anime answer for the quiz (e.g. the anime or the song name)",
 )
 async def update_quiz(
     interaction: discord.Interaction,
