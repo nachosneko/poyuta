@@ -76,15 +76,6 @@ bot = PoyutaBot(command_prefix=config["COMMAND_PREFIX"], intents=intents)
 async def on_ready():
     print(f"logged in as {bot.user.name}")
 
-    try:
-        synced = await bot.tree.sync()
-        print(f"synced {len(synced)} command(s)")
-
-        for command in synced:
-            print(f"{command.name} synced")
-    except Exception as e:
-        print(e)
-
     scheduler = AsyncIOScheduler()
     scheduler.add_job(
         post_yesterdays_quiz_results,
@@ -94,6 +85,18 @@ async def on_ready():
         second=DAILY_QUIZ_RESET_TIME.second,
     )
     scheduler.start()
+
+    print(scheduler.get_jobs())
+
+    try:
+        print("syncing commands")
+        synced = await bot.tree.sync()
+        print(f"synced {len(synced)} command(s)")
+
+        for command in synced:
+            print(f"{command.name} synced")
+    except Exception as e:
+        print(e)
 
 
 # --- Answering seiyuu --- #
@@ -149,7 +152,6 @@ async def female_answer_quiz(ctx: commands.Context):
     """
 
     answer = ctx.message.content.split(" ", 1)[1:]
-    print(answer)
 
     # edit their message to hide the answer
     await ctx.message.delete()
@@ -267,7 +269,7 @@ async def answer_quiz_type(
         if not start_quiz_timestamp:
             embed.add_field(
                 name="Invalid",
-                value=f"You haven't started the {quiz_type_name} quiz yet. How would you know the answer? :HMM~1:",
+                value=f"You haven't started the {quiz_type_name} quiz yet. How would you know the answer? :HMM:",
                 inline=True,
             )
 
@@ -904,9 +906,6 @@ async def post_yesterdays_quiz_results():
             for quiz_channel in session.query(QuizChannels).all():
                 channel = bot.get_channel(quiz_channel.id_channel)
                 await channel.send(embed=embed)
-
-        print(current_quiz_date)
-        print(yesterday)
 
         for quiz_channel in session.query(QuizChannels).all():
             channel = bot.get_channel(quiz_channel.id_channel)
