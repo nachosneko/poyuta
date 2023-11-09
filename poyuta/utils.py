@@ -20,6 +20,7 @@ from poyuta.database import Quiz, QuizType, Answer, User
 
 # Typing helpers
 from sqlalchemy.orm.session import Session
+from typing import List, Tuple
 
 # Define a list of replacement rules
 ANIME_REGEX_REPLACE_RULES = [
@@ -492,7 +493,7 @@ def get_user_from_id(
     return db_user
 
 
-def get_quiz_type_choices(session: Session) -> list[tuple[int, str]]:
+def get_quiz_type_choices(session: Session) -> List[Tuple[int, str]]:
     """
     Get the quiz type choices.
 
