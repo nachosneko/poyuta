@@ -612,7 +612,7 @@ async def my_stats(ctx: commands.Context):
 
 @bot.command(name="leaderboard")
 # Add other decorators as needed
-async def my_stats(ctx: commands.Context):
+async def leaderboard(ctx: commands.Context):
     """
     Display the leaderboards.
 
@@ -659,8 +659,11 @@ async def my_stats(ctx: commands.Context):
             medals = [":first_place:", ":second_place:", ":third_place:"]
             value = ""
             for i, top in enumerate(top_10):
+                # force round to 1 decimal even if there are no decimals
+                points = round(float(top[1]), 1)
+
                 rank = f"{medals[i]} " if i < 3 else f"#{i + 1}: "
-                value += f"> {rank} <@{top[0]}>: {top[1]} points\n"
+                value += f"> {rank} <@{top[0]}>: {points} points\n"
 
             embed.add_field(
                 name=f"> {quiz_type.emoji} {quiz_type.type}", value=value, inline=True
@@ -696,10 +699,50 @@ async def my_stats(ctx: commands.Context):
         value = ""
 
         for i, top in enumerate(top_10):
+            # force round to 1 decimal even if there are no decimals
+            points = round(float(top[1]), 1)
+
             rank = f"{medals[i]} " if i < 3 else f"#{i + 1}: "
-            value += f"> {rank} <@{top[0]}>: {top[1]} points\n"
+            value += f"> {rank} <@{top[0]}>: {points} points\n"
 
         embed.add_field(name="> Global Leaderboard", value=value, inline=False)
+
+    await ctx.send(embed=embed)
+
+
+@bot.command(name="legacyleaderboard")
+# Add other decorators as needed
+async def legacy_leaderboard(ctx: commands.Context):
+    """
+    Display the leaderboards for quizzed that happened before this bot.
+
+    Examples
+    ---------
+    !legacyleaderboard
+    """
+
+    medals = [":first_place:", ":second_place:", ":third_place:"]
+
+    # open database/legacy_leaderboard.txt and read line by line
+    # loop on lines
+    # split line on space
+
+    embed = discord.Embed(title="Legacy Leaderboard")
+
+    value = ""
+    with open("database/legacy_leaderboard.txt", "r") as file:
+        for i, line in enumerate(file):
+            if not line:
+                continue
+
+            line = line.strip()
+
+            discord_id, male, female, overall = line.split(" ")
+
+            rank = f"{medals[i]} " if i < 3 else f"`#{i + 1}: `"
+            value += f"> {rank} <@{discord_id}>: {overall} ({male}m + {female}f)\n"
+
+    embed.add_field(name="> Global Leaderboard", value=value, inline=False)
 
     await ctx.send(embed=embed)
 

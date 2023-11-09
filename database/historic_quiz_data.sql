@@ -1,6 +1,4 @@
 INSERT INTO users (id, name, pfp, is_admin) VALUES
-(161026455696834560, "xsardine", null, 1),
-(161026455696834560, "husa", null, 1),
 (161026455696834560, "EruisKawaii", null, 1);
 
 INSERT INTO quizzes (creator_id, date, clip, answer, id_type) VALUES
@@ -39,4 +37,8 @@ INSERT INTO quizzes (creator_id, date, clip, answer, id_type) VALUES
 (161026455696834560, '2023-11-06', 'https://files.catbox.moe/d6h8f1.mp3', 'Kazuyuki Okitsu', 1),
 (161026455696834560, '2023-11-06', 'https://files.catbox.moe/rb30rq.mp3', 'Sora Amamiya', 2),
 (161026455696834560, '2023-11-07', 'https://files.catbox.moe/21pxct.mp3', 'Makoto Furukawa', 1),
-(161026455696834560, '2023-11-07', 'https://files.catbox.moe/znbc9a.mp3', 'Chiwa Saitou', 2);
+(161026455696834560, '2023-11-07', 'https://files.catbox.moe/znbc9a.mp3', 'Chiwa Saitou', 2),
+(161026455696834560, '2023-11-08', 'https://files.catbox.moe/fx1k6r.mp3', 'Daisuke Namikawa', 1),
+(161026455696834560, '2023-11-08', 'https://files.catbox.moe/9yppet.mp3', 'Rie Takahashi', 2),
+(161026455696834560, '2023-11-09', 'https://files.catbox.moe/fytms9.mp3', 'Takuma Terashima', 1),
+(161026455696834560, '2023-11-09', 'https://files.catbox.moe/e2byxe.mp3', 'Saya Aizawa', 2);
