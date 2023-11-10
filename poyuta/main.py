@@ -176,6 +176,7 @@ async def answer_quiz_type(
 
     # remove spoiler tags if present
     answer = re.sub(r"\|\|", "", answer)
+    answer = answer.strip()
 
     embed = discord.Embed(
         title=f"{quiz_type_name} Quiz Results",
@@ -417,6 +418,7 @@ async def answer_bonus_quiz(
 
     # remove spoiler tags if present
     answer = re.sub(r"\|\|", "", answer)
+    answer = answer.strip()
 
     embed = discord.Embed(
         title=f"{quiz_type_name} Quiz Results",
@@ -603,6 +605,7 @@ async def my_stats(ctx: commands.Context):
                 embed=embed,
                 user_id=user.id,
                 quiz_type=quiz_type,
+                daily_quiz_reset_time=DAILY_QUIZ_RESET_TIME,
             )
 
             # Linebreak unless last quiz type
@@ -913,6 +916,16 @@ async def post_yesterdays_quiz_results():
             await channel.send(view=view)
 
 
+@bot.event
+async def post_quiz_buttons():
+    current_quiz_date = get_current_quiz_date(DAILY_QUIZ_RESET_TIME)
+    with bot.session as session:
+        for quiz_channel in session.query(QuizChannels).all():
+            channel = bot.get_channel(quiz_channel.id_channel)
+            view = NewQuizView(current_quiz_date)
+            await channel.send(view=view)
+
+
 class NewQuizButton(discord.ui.Button):
     """Class for the NewQuizButton"""
 
@@ -991,7 +1004,7 @@ class NewQuizButton(discord.ui.Button):
             if current_quiz.bonus_answer:
                 embed.add_field(
                     name="",
-                    value=f"There is a bonus anime point for this quiz. Try `!{self.quiz_type.type.lower()}anime ||your answer||` to get it once you guessed the seiyuu.",
+                    value=f"There is a bonus anime point for this quiz. Try to get it once you guessed the seiyuu.",
                     inline=False,
                 )
 
@@ -1000,7 +1013,7 @@ class NewQuizButton(discord.ui.Button):
 
 class NewQuizView(discord.ui.View):
     def __init__(self, new_quiz_date):
-        super().__init__()
+        super().__init__(timeout=None)
 
         with bot.session as session:
             for quiz_type in session.query(QuizType).all():
@@ -1074,6 +1087,13 @@ async def unsetchannel(ctx):
 async def postquizresults(ctx):
     """*Bot Admin only* Force the bot to post yesterday's quiz results."""
     await post_yesterdays_quiz_results()
+
+
+@commands.check(lambda ctx: is_bot_admin(session=bot.session, user=ctx.author))
+@bot.command()  # for quick debugging
+async def postquizbuttons(ctx):
+    """*Bot Admin only* Force the bot to post yesterday's quiz results."""
+    await post_quiz_buttons()
 
 
 @bot.tree.command(name="newquiz")

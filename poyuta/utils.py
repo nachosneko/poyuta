@@ -242,7 +242,11 @@ def is_bot_admin(session: Session, user: User):
 
 
 def generate_stats_embed_content(
-    session: Session, embed: Embed, user_id: int, quiz_type: Quiz
+    session: Session,
+    embed: Embed,
+    user_id: int,
+    quiz_type: Quiz,
+    daily_quiz_reset_time: time,
 ):
     """Generate the stats embed content.
 
@@ -263,12 +267,18 @@ def generate_stats_embed_content(
         Filled embed.
     """
 
+    current_quiz_date = get_current_quiz_date(daily_quiz_reset_time)
+
     with session as session:
         # Get the answers for this type
         answers = (
             session.query(Answer)
             .join(Quiz)
-            .filter(Answer.user_id == user_id, Quiz.id_type == quiz_type.id)
+            .filter(
+                Answer.user_id == user_id,
+                Quiz.id_type == quiz_type.id,
+                Quiz.date < current_quiz_date,
+            )
             .all()
         )
 
@@ -334,6 +344,7 @@ def generate_stats_embed_content(
             .filter(
                 Answer.user_id == user_id,
                 Quiz.id_type == quiz_type.id,
+                Quiz.date < current_quiz_date,
                 Answer.is_correct,
             )
             .order_by(Answer.answer_time)
