@@ -1080,8 +1080,8 @@ async def postquizresults(ctx):
 @app_commands.choices(quiz_type=get_quiz_type_choices(session=bot.session))
 @app_commands.describe(
     quiz_type="type of the quiz to update",
-    new_clip="input new clip for female",
-    new_answer="input new seiyuu for female clip",
+    new_clip="input new clip",
+    new_answer="input new seiyuu",
     new_bonus_answer="The bonus anime answer for the quiz",
 )
 async def new_quiz(
@@ -1219,8 +1219,8 @@ async def planned_quizzes(interaction: discord.Interaction):
 @app_commands.describe(
     quiz_date="date of the quiz to update in YYYY-MM-DD format",
     quiz_type="type of the quiz to update",
-    new_clip="input new clip for female",
-    new_answer="input new seiyuu for female clip",
+    new_clip="input new clip",
+    new_answer="input new seiyuu",
     new_bonus_answer="The bonus anime answer for the quiz (e.g. the anime or the song name)",
 )
 async def update_quiz(
@@ -1229,7 +1229,7 @@ async def update_quiz(
     quiz_type: app_commands.Choice[int],
     new_clip: str,
     new_answer: str,
-    new_bonus_answer: str,
+    new_bonus_answer: Optional[str] = None,
 ):
     """*Bot Admin only* - Update a planned quiz."""
 
