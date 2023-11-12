@@ -112,6 +112,7 @@ async def help(ctx, command: str = None):
     embed.add_field(
         name=f"Type `{config['COMMAND_PREFIX']}help <command>` for more details.",
         value="\u200b",
+        inline=False,
     )
 
     # Check if a specific command is requested
