@@ -99,6 +99,59 @@ async def on_ready():
         print(e)
 
 
+# attempt to decorate up the help command
+bot.remove_command('help')
+
+@bot.command()
+async def help(ctx, command: str = None):
+    # Create an Embed
+    embed = discord.Embed(title="Command Help", color=discord.Color.blue())
+
+    # Check if a specific command is requested
+    if command:
+        # Check if the requested command exists
+        command = command.lower()  # Convert to lowercase for case-insensitive comparison
+
+        # Check in general commands
+        for cmd in bot.commands:
+            if cmd.name.lower() == command:
+                # Display the help for the specific command
+                embed.add_field(name=f"Help for !{cmd.name}", value=f"{cmd.help}")
+                await ctx.send(embed=embed)
+                return
+
+        await ctx.send(f"Command `{command}` not found.")
+        return
+
+    # General Commands
+    embed.add_field(name="> **General Commands:**", value="```!male ||answer||```", inline=False)
+    embed.add_field(name="", value="```!maleanime ||answer||```", inline=False)
+    embed.add_field(name="", value="```!female ||answer||```", inline=False)
+    embed.add_field(name="", value="```!femaleanime ||answer||```", inline=False)
+    embed.add_field(name="", value="```!mystats```", inline=False)
+    embed.add_field(name="", value="```!leaderboard```", inline=False)
+    embed.add_field(name="", value="```!legacyleaderboard```", inline=False)
+
+    # Check if the user is an admin
+    is_bot_admin = ctx.author.guild_permissions.administrator
+
+    # If the user is an admin, show admin commands
+    if is_bot_admin:
+        # Extra spaces
+        embed.add_field(name="", value="", inline=False)
+
+        # Admin Commands (for admins only)
+        embed.add_field(name="> **Admin Commands:**", value="```!postquizresults```", inline=False)
+        embed.add_field(name="", value="```!postquizbuttons```", inline=False)
+        embed.add_field(name="", value="```!setchannel```", inline=False)
+        embed.add_field(name="", value="```!unsetchannel```", inline=False)
+        embed.add_field(name="", value="```/newquiz ```", inline=False)
+        embed.add_field(name="", value="```/updatequiz ```", inline=False)
+        embed.add_field(name="", value="```/plannedquizzes```", inline=False)
+        # for c/p new commands: embed.add_field(name="", value="``````", inline=False)
+
+    # Send the embed
+    await ctx.send(embed=embed)
 # --- Answering seiyuu --- #
 
 
@@ -191,7 +244,7 @@ async def answer_quiz_type(
     if not answer:
         embed.add_field(
             name="Invalid",
-            value=f"Please provide an answer : `!{quiz_type_name.lower()} ||your answer||`",
+            value=f"Please provide an answer: `!{quiz_type_name.lower()} ||your answer||`",
             inline=True,
         )
 
@@ -295,7 +348,7 @@ async def answer_quiz_type(
             input_str=answer, partial_match=False, swap_words=True
         )
 
-        # If the pattern matches : the answer is correct
+        # If the pattern matches: the answer is correct
         if re.search(user_answer_pattern, quiz.answer, re.IGNORECASE):
             # if they don't have a bonus point yet
             if not has_correct_bonus and quiz.bonus_answer:
@@ -305,7 +358,7 @@ async def answer_quiz_type(
 
             embed.add_field(
                 name="Answer",
-                value=f"✅ Correct in {answer_time}s !{bonus_point_feedback}",
+                value=f"✅ Correct in {answer_time}s!{bonus_point_feedback}",
                 inline=True,
             )
 
@@ -320,11 +373,11 @@ async def answer_quiz_type(
 
             return
 
-        # Otherwise, the pattern doesn't match : the answer is incorrect
+        # Otherwise, the pattern doesn't match: the answer is incorrect
         else:
             embed.add_field(
                 name="Answer",
-                value="❌ Incorrect !",
+                value="❌ Incorrect!",
                 inline=True,
             )
 
@@ -342,7 +395,7 @@ async def answer_quiz_type(
 # --- Answering anime --- #
 
 
-@bot.command(name="maleanime")
+@bot.command(name="maleanime", aliases=['ma'])
 # Add other decorators as needed
 async def male_bonus_answer_quiz(
     ctx: commands.Context,
@@ -374,7 +427,7 @@ async def male_bonus_answer_quiz(
     )
 
 
-@bot.command(name="femaleanime")
+@bot.command(name="femaleanime", aliases=['fa'])
 # Add other decorators as needed
 async def female_bonus_answer_quiz(
     ctx: commands.Context,
@@ -433,7 +486,7 @@ async def answer_bonus_quiz(
     if not answer:
         embed.add_field(
             name="Invalid",
-            value=f"Please provide an answer : `!{quiz_type_name.lower()} ||your answer||`",
+            value=f"Please provide an answer: `!{quiz_type_name.lower()} ||your answer||`",
             inline=True,
         )
 
@@ -548,7 +601,7 @@ async def answer_bonus_quiz(
 
             embed.add_field(
                 name="Answer",
-                value=f"✅ Correct in {answer_time}s ! +1 bonus anime point !",
+                value=f"✅ Correct in {answer_time}s! +1 bonus anime point!",
                 inline=True,
             )
 
@@ -561,14 +614,14 @@ async def answer_bonus_quiz(
 
             embed.add_field(
                 name="Answer",
-                value="❌ Incorrect ! Still no bonus anime point for you :disappointed_relieved:",
+                value="❌ Incorrect! Still no bonus anime point for you :disappointed_relieved:",
                 inline=True,
             )
             await ctx.send(embed=embed)
             return
 
 
-@bot.command(name="mystats")
+@bot.command(name="mystats", aliases=['stats'])
 # Add other decorators as needed
 async def my_stats(ctx: commands.Context):
     """
@@ -715,7 +768,7 @@ async def leaderboard(ctx: commands.Context):
     await ctx.send(embed=embed)
 
 
-@bot.command(name="legacyleaderboard")
+@bot.command(name="legacyleaderboard", aliases=['ll'])
 # Add other decorators as needed
 async def legacy_leaderboard(ctx: commands.Context):
     """
@@ -775,9 +828,9 @@ async def post_yesterdays_quiz_results():
             )
 
             if yesterday_quiz:
-                answer_feedback = f"> Answer : ||{yesterday_quiz.answer}||"
+                answer_feedback = f"> Answer: ||{yesterday_quiz.answer}||"
                 bonus_feedback = (
-                    f"\n> Bonus answer : ||{yesterday_quiz.bonus_answer}||"
+                    f"\n> Bonus answer: ||{yesterday_quiz.bonus_answer}||"
                     if yesterday_quiz.bonus_answer
                     else ""
                 )
@@ -807,7 +860,7 @@ async def post_yesterdays_quiz_results():
 
             # if we're here, that means there was a quiz
 
-            # TODO : add the author of the quiz in database and retrieve it from there
+            # TODO: add the author of the quiz in database and retrieve it from there
             creator_pfp = reconstruct_discord_pfp_url(
                 user_id=yesterday_quiz.creator_id,
                 pfp_hash=yesterday_quiz.creator.pfp,
@@ -1083,14 +1136,14 @@ async def unsetchannel(ctx):
 
 
 @commands.check(lambda ctx: is_bot_admin(session=bot.session, user=ctx.author))
-@bot.command()  # for quick debugging
+@bot.command(aliases=['pqr'])  # for quick debugging
 async def postquizresults(ctx):
     """*Bot Admin only* Force the bot to post yesterday's quiz results."""
     await post_yesterdays_quiz_results()
 
 
 @commands.check(lambda ctx: is_bot_admin(session=bot.session, user=ctx.author))
-@bot.command()  # for quick debugging
+@bot.command(aliases=['pqb'])  # for quick debugging
 async def postquizbuttons(ctx):
     """*Bot Admin only* Force the bot to post yesterday's quiz results."""
     await post_quiz_buttons()
