@@ -1,32 +1,34 @@
 # Standard libraries
 import re
-from datetime import datetime, date, timedelta
+import random
+import numpy as np
+from datetime import datetime, date, timedelta, time
 from typing import Optional
 
 # Discord
 import discord
 from discord import app_commands, Embed, Button, ButtonStyle
 from discord.ext import commands
-import random
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-
-from sqlalchemy import case, func
-from sqlalchemy.orm import joinedload
 
 
 # Database
+from sqlalchemy import case, func
+from sqlalchemy.orm import joinedload
+from sqlalchemy.orm.session import Session
 from poyuta.database import (
-    UserStartQuizTimestamp,
+    User,
     Quiz,
-    QuizChannels,
     QuizType,
+    UserStartQuizTimestamp,
+    QuizChannels,
     Answer,
     SessionFactory,
     initialize_database,
 )
 
-
 # Utils
+from poyuta.paginator import EmbedPaginatorSession
 from poyuta.utils import (
     load_environment,
     process_user_input,
@@ -36,7 +38,6 @@ from poyuta.utils import (
     get_quiz_type_choices,
     is_server_admin,
     is_bot_admin,
-    generate_stats_embed_content,
 )
 
 config = load_environment()
@@ -100,17 +101,25 @@ async def on_ready():
 
 
 # attempt to decorate up the help command
-bot.remove_command('help')
+bot.remove_command("help")
+
 
 @bot.command()
 async def help(ctx, command: str = None):
     # Create an Embed
     embed = discord.Embed(title="Command Help", color=discord.Color.blue())
 
+    embed.add_field(
+        name=f"Type `{config['COMMAND_PREFIX']}help <command>` for more details.",
+        value="\u200b",
+    )
+
     # Check if a specific command is requested
     if command:
         # Check if the requested command exists
-        command = command.lower()  # Convert to lowercase for case-insensitive comparison
+        command = (
+            command.lower()
+        )  # Convert to lowercase for case-insensitive comparison
 
         # Check in general commands
         for cmd in bot.commands:
@@ -124,10 +133,12 @@ async def help(ctx, command: str = None):
         return
 
     # General Commands
-    embed.add_field(name="> **General Commands:**", value="```!male ||answer||```", inline=False)
-    embed.add_field(name="", value="```!maleanime ||answer||```", inline=False)
-    embed.add_field(name="", value="```!female ||answer||```", inline=False)
-    embed.add_field(name="", value="```!femaleanime ||answer||```", inline=False)
+    embed.add_field(
+        name="> **General Commands:**", value="```!male ||my answer||```", inline=False
+    )
+    embed.add_field(name="", value="```!maleanime ||my answer||```", inline=False)
+    embed.add_field(name="", value="```!female ||my answer||```", inline=False)
+    embed.add_field(name="", value="```!femaleanime ||my answer||```", inline=False)
     embed.add_field(name="", value="```!mystats```", inline=False)
     embed.add_field(name="", value="```!leaderboard```", inline=False)
     embed.add_field(name="", value="```!legacyleaderboard```", inline=False)
@@ -141,7 +152,9 @@ async def help(ctx, command: str = None):
         embed.add_field(name="", value="", inline=False)
 
         # Admin Commands (for admins only)
-        embed.add_field(name="> **Admin Commands:**", value="```!postquizresults```", inline=False)
+        embed.add_field(
+            name="> **Admin Commands:**", value="```!postquizresults```", inline=False
+        )
         embed.add_field(name="", value="```!postquizbuttons```", inline=False)
         embed.add_field(name="", value="```!setchannel```", inline=False)
         embed.add_field(name="", value="```!unsetchannel```", inline=False)
@@ -152,6 +165,8 @@ async def help(ctx, command: str = None):
 
     # Send the embed
     await ctx.send(embed=embed)
+
+
 # --- Answering seiyuu --- #
 
 
@@ -395,7 +410,7 @@ async def answer_quiz_type(
 # --- Answering anime --- #
 
 
-@bot.command(name="maleanime", aliases=['ma'])
+@bot.command(name="maleanime", aliases=["ma"])
 # Add other decorators as needed
 async def male_bonus_answer_quiz(
     ctx: commands.Context,
@@ -427,7 +442,7 @@ async def male_bonus_answer_quiz(
     )
 
 
-@bot.command(name="femaleanime", aliases=['fa'])
+@bot.command(name="femaleanime", aliases=["fa"])
 # Add other decorators as needed
 async def female_bonus_answer_quiz(
     ctx: commands.Context,
@@ -621,7 +636,7 @@ async def answer_bonus_quiz(
             return
 
 
-@bot.command(name="mystats", aliases=['stats'])
+@bot.command(name="mystats", aliases=["stats"])
 # Add other decorators as needed
 async def my_stats(ctx: commands.Context):
     """
@@ -653,7 +668,7 @@ async def my_stats(ctx: commands.Context):
             )
 
             # generate the embed content for this quiz_type
-            embed = generate_stats_embed_content(
+            embed = await generate_stats_embed_content(
                 session=session,
                 embed=embed,
                 user_id=user.id,
@@ -668,11 +683,165 @@ async def my_stats(ctx: commands.Context):
     await ctx.send(embed=embed)
 
 
+async def generate_stats_embed_content(
+    session: Session,
+    embed: Embed,
+    user_id: int,
+    quiz_type: Quiz,
+    daily_quiz_reset_time: time,
+):
+    """Generate the stats embed content.
+
+    Parameters
+    ----------
+    session : Session
+        Database session.
+
+    embed : Embed
+        Embed to fill.
+
+    answers : list[Answer]
+        List of answers to process.
+
+    Returns
+    -------
+    Embed
+        Filled embed.
+    """
+
+    current_quiz_date = get_current_quiz_date(daily_quiz_reset_time)
+
+    with session as session:
+        # Get the answers for this type
+
+        played_quizzes = (
+            session.query(Quiz)
+            .join(UserStartQuizTimestamp)
+            .filter(
+                Quiz.id_type == quiz_type.id,
+                UserStartQuizTimestamp.user_id == user_id,
+            )
+        ).all()
+
+        answers = (
+            session.query(Answer)
+            .join(Quiz)
+            .filter(Answer.user_id == user_id, Quiz.id_type == quiz_type.id)
+            .all()
+        )
+
+        correct_answers = [answer for answer in answers if answer.is_correct]
+
+        # Guess Rates
+        guess_rate = (
+            round(len(correct_answers) / len(played_quizzes) * 100, 2)
+            if played_quizzes
+            else "N/A"
+        )
+        correct_bonus = [answer for answer in answers if answer.is_bonus_point]
+        embed.add_field(
+            name="> :dart: Guess Rate",
+            value=f"> {guess_rate}% ({len(correct_answers)}/{len(played_quizzes)}) + {len(correct_bonus)} bonus points",
+            inline=True,
+        )
+
+        # Average Guess Time
+        average_guess_time = (
+            round(
+                np.mean([answer.answer_time for answer in correct_answers]),
+                2,
+            )
+            if correct_answers
+            else "N/A"
+        )
+        embed.add_field(
+            name="> :clock1: Average Guess Time",
+            value=f"> {average_guess_time}s",
+            inline=True,
+        )
+
+        embed.add_field(name="", value="", inline=False)
+
+        # Total attempts
+        nb_total_attempts = len(
+            [answer for answer in answers if answer.answer != "\\Bonus Answer\\"]
+        )
+        embed.add_field(
+            name="> :1234: Total Attempts",
+            value=f"> {nb_total_attempts} attempt(s)",
+            inline=True,
+        )
+
+        # Average number of attempts per quiz
+        average_attempts = (
+            round(nb_total_attempts / len(played_quizzes), 2)
+            if played_quizzes
+            else "N/A"
+        )
+        embed.add_field(
+            name="> :repeat: Average Attempts",
+            value=f"> {average_attempts} attempt(s)",
+            inline=True,
+        )
+
+        embed.add_field(name="", value="", inline=False)
+
+        # Fastest Guesses for this user
+        fastest_answers = (
+            session.query(Answer)
+            .join(Quiz)
+            .filter(
+                Answer.user_id == user_id,
+                Quiz.id_type == quiz_type.id,
+                Quiz.date < current_quiz_date,
+                Answer.is_correct,
+            )
+            .order_by(Answer.answer_time)
+            .limit(3)
+            .all()
+        )
+
+        medals = [":first_place:", ":second_place:", ":third_place:"]
+
+        nb_attempts = []
+        for fastest_answer in fastest_answers:
+            nb_attempts.append(
+                session.query(Answer)
+                .filter(
+                    Answer.user_id == fastest_answer.user_id,
+                    Answer.quiz_id == fastest_answer.quiz_id,
+                )
+                .count()
+            )
+
+        fastest_answers = "\n\n".join(
+            [
+                f"{medals[i]} | **{answer.answer_time}s** : {answer.answer} in {nb_attempts[i]} attempts on {answer.quiz.date}"
+                for i, answer in enumerate(fastest_answers)
+            ]
+        )
+
+    embed.add_field(
+        name="__Fastest guesses__",
+        value=fastest_answers,
+        inline=True,
+    )
+
+    return embed
+
+
 @bot.command(name="leaderboard")
 # Add other decorators as needed
 async def leaderboard(ctx: commands.Context):
     """
     Display the leaderboards.
+
+    Score is computed as follows :
+    - 1 point for each correct answer
+    - 0.5 point for each bonus anime point
+    - if there has been more than 5 attempts before getting a correct answer : 0.5 points
+    - if there has been more than 8 attempts before getting a correct answer : 0.25 points
+    - if there has been more than 3 attempts before getting a correct bonus anime : 0.25 points
 
     Examples
     ---------
@@ -680,95 +849,143 @@ async def leaderboard(ctx: commands.Context):
     """
 
     with bot.session as session:
-        # create the embed object
-        embed = discord.Embed(title="")
-
-        # get top 10 highest scorers for each quiz type
+        users = session.query(User).all()
         quiz_types = session.query(QuizType).all()
+        medals = [":first_place:", ":second_place:", ":third_place:"]
+
+        # initialize the score dict
+        user_scores = {"total": {user.id: 0 for user in users}}
         for quiz_type in quiz_types:
-            # group by user_id and count is_correct as 1 and is_bonus_point as 0.5
-            top_10 = (
-                session.query(
-                    Answer.user_id,
-                    func.sum(
-                        case(
-                            (Answer.is_correct, 1),
-                            (Answer.is_bonus_point, 0.5),
-                            else_=0,
-                        )
-                    ),
+            user_scores[quiz_type.type] = {user.id: 0 for user in users}
+
+        for user in users:
+            for quiz_type in quiz_types:
+                user_score = await compute_user_score(
+                    id_user=user.id, id_quiz_type=quiz_type.id
                 )
-                .join(Quiz)
-                .filter(Quiz.id_type == quiz_type.id)
-                .group_by(Answer.user_id)
-                .order_by(
-                    func.sum(
-                        case(
-                            (Answer.is_correct, 1),
-                            (Answer.is_bonus_point, 0.5),
-                            else_=0,
-                        )
-                    ).desc()
-                )
-                .limit(10)
-                .all()
+                user_scores[quiz_type.type][user.id] += user_score
+                user_scores["total"][user.id] += user_score
+
+        for quiz_type in quiz_types:
+            user_scores[quiz_type.type] = await sort_user_scores_by_value(
+                user_scores[quiz_type.type]
             )
 
-            medals = [":first_place:", ":second_place:", ":third_place:"]
+        # sort global by value
+        user_scores["total"] = await sort_user_scores_by_value(user_scores["total"])
+
+    pages = []
+    for page_start in range(0, len(users), 10):
+        embed = discord.Embed(title="Leaderboard")
+
+        page_end = np.min([page_start + 10, len(users)])
+
+        for quiz_type in quiz_types:
             value = ""
-            for i, top in enumerate(top_10):
-                # force round to 1 decimal even if there are no decimals
-                points = round(float(top[1]), 1)
-
-                rank = f"{medals[i]} " if i < 3 else f"#{i + 1}: "
-                value += f"> {rank} <@{top[0]}>: {points} points\n"
-
+            for i, id_user in enumerate(
+                list(user_scores[quiz_type.type].keys())[page_start:page_end]
+            ):
+                index = page_start + i
+                rank = f"{medals[index]} " if index < 3 else f"#{index + 1}: "
+                value += f"> {rank} <@{id_user}>: {user_scores[quiz_type.type][id_user]} points\n"
             embed.add_field(
                 name=f"> {quiz_type.emoji} {quiz_type.type}", value=value, inline=True
             )
 
-        # global leaderboard
-        top_10 = (
+        value = ""
+        for i, id_user in enumerate(
+            list(user_scores["total"].keys())[page_start:page_end]
+        ):
+            index = page_start + i
+            rank = f"{medals[index]} " if index < 3 else f"#{index + 1}: "
+            value += f"> {rank} <@{id_user}>: {user_scores['total'][id_user]} points\n"
+        embed.add_field(name="> Global Leaderboard", value=value, inline=False)
+
+        pages.append(embed)
+
+    session = EmbedPaginatorSession(ctx, *pages)
+    await session.run()
+
+
+async def sort_user_scores_by_value(user_scores: dict):
+    return dict(
+        sorted(
+            user_scores.items(),
+            key=lambda item: item[1],
+            reverse=True,
+        )
+    )
+
+
+async def compute_user_score(id_user: int, id_quiz_type: int):
+    """
+    Compute the score of a user for a given quiz type.
+
+    Score is computed as follows :
+    - 1 point for each correct answer
+    - 0.5 point for each bonus anime point
+    - if there has been more than 5 attempts before getting a correct answer : 0.5 points
+    - if there has been more than 8 attempts before getting a correct answer : 0.25 points
+    - if there has been more than 3 attempts before getting a correct bonus anime : 0.25 points
+
+    Parameters
+    ----------
+    id_user : int
+        The id of the user.
+
+    id_quiz_type : int
+        The id of the quiz type.
+
+    Returns
+    -------
+    float
+        The score of the user for the given quiz type.
+    """
+
+    nb_points = 0
+    with bot.session as session:
+        # query to get all correct answers and the count of attempts for each quiz id
+        correct_results = (
             session.query(
-                Answer.user_id,
-                func.sum(
-                    case(
-                        (Answer.is_correct, 1),
-                        (Answer.is_bonus_point, 0.5),
-                        else_=0,
-                    )
-                ),
+                Answer.quiz_id, func.count(Answer.id), func.sum(Answer.is_correct)
             )
-            .group_by(Answer.user_id)
-            .order_by(
-                func.sum(
-                    case(
-                        (Answer.is_correct, 1),
-                        (Answer.is_bonus_point, 0.5),
-                        else_=0,
-                    )
-                ).desc()
+            .join(Quiz)
+            .filter(
+                Answer.user_id == id_user,
+                Quiz.id_type == id_quiz_type,
             )
-            .limit(10)
+            .group_by(Answer.quiz_id)
             .all()
         )
 
-        medals = [":first_place:", ":second_place:", ":third_place:"]
-        value = ""
+        for id_quiz, nb_attempts, is_correct in correct_results:
+            if is_correct:
+                nb_point = 1 if nb_attempts <= 5 else 0.5 if nb_attempts <= 8 else 0.25
+                nb_points += nb_point
 
-        for i, top in enumerate(top_10):
-            # force round to 1 decimal even if there are no decimals
-            points = round(float(top[1]), 1)
+        # query to get all correct anime points and the count of attempts for each quiz id
+        bonus_results = (
+            session.query(
+                Answer.quiz_id, func.count(Answer.id), func.sum(Answer.is_bonus_point)
+            )
+            .join(Quiz)
+            .filter(
+                Answer.user_id == id_user,
+                Quiz.id_type == id_quiz_type,
+                Answer.answer == "\\Bonus Answer\\",
+            )
+            .group_by(Answer.quiz_id)
+            .all()
+        )
+        for id_quiz, nb_attempts, is_correct in bonus_results:
+            if is_correct:
+                nb_point = 0.5 if nb_attempts <= 3 else 0.25
+                nb_points += nb_point
 
-            rank = f"{medals[i]} " if i < 3 else f"#{i + 1}: "
-            value += f"> {rank} <@{top[0]}>: {points} points\n"
-
-        embed.add_field(name="> Global Leaderboard", value=value, inline=False)
-
-    await ctx.send(embed=embed)
+    return round(float(nb_points), 2)
 
 
-@bot.command(name="legacyleaderboard", aliases=['ll'])
+@bot.command(name="legacyleaderboard", aliases=["ll"])
 # Add other decorators as needed
 async def legacy_leaderboard(ctx: commands.Context):
     """
@@ -909,14 +1126,19 @@ async def post_yesterdays_quiz_results():
             embed.add_field(name="> Time", value=top_times, inline=True)
 
             # Attempts
-            top_attempts = "\n".join(
-                [
-                    f"> {len(answer.user.answers)}"
-                    for i, answer in enumerate(top_faster_answers)
-                    if answer.quiz_id == yesterday_quiz.id
+
+            top_attempts = []
+            for answer in top_faster_answers:
+                attempts = [
+                    answer
+                    for answer in answer.user.answers
+                    if answer.is_correct and answer.answer != "\\Bonus Answer\\"
                 ]
+                top_attempts.append(f"> {len(attempts)}")
+
+            embed.add_field(
+                name="> Attempts", value="\n".join(top_attempts), inline=True
             )
-            embed.add_field(name="> Attempts", value=top_attempts, inline=True)
 
             # Most incorrectly guessed
             # Count each incorrect answer
@@ -1136,14 +1358,14 @@ async def unsetchannel(ctx):
 
 
 @commands.check(lambda ctx: is_bot_admin(session=bot.session, user=ctx.author))
-@bot.command(aliases=['pqr'])  # for quick debugging
+@bot.command(aliases=["pqr"])  # for quick debugging
 async def postquizresults(ctx):
     """*Bot Admin only* Force the bot to post yesterday's quiz results."""
     await post_yesterdays_quiz_results()
 
 
 @commands.check(lambda ctx: is_bot_admin(session=bot.session, user=ctx.author))
-@bot.command(aliases=['pqb'])  # for quick debugging
+@bot.command(aliases=["pqb"])  # for quick debugging
 async def postquizbuttons(ctx):
     """*Bot Admin only* Force the bot to post yesterday's quiz results."""
     await post_quiz_buttons()
