@@ -171,7 +171,7 @@ async def help(ctx, command: str = None):
 # --- Answering seiyuu --- #
 
 
-@bot.command(name="male")
+@bot.command(name="male", aliases=["m"])
 # Add other decorators as needed
 async def male_answer_quiz(
     ctx: commands.Context,
@@ -202,7 +202,7 @@ async def male_answer_quiz(
     )
 
 
-@bot.command(name="female")
+@bot.command(name="female", aliases=["f"])
 # Add other decorators as needed
 async def female_answer_quiz(ctx: commands.Context):
     """
@@ -637,7 +637,7 @@ async def answer_bonus_quiz(
             return
 
 
-@bot.command(name="mystats", aliases=["stats"])
+@bot.command(name="mystats", aliases=["ms", "stats", "s"])
 # Add other decorators as needed
 async def my_stats(ctx: commands.Context):
     """
@@ -831,7 +831,7 @@ async def generate_stats_embed_content(
     return embed
 
 
-@bot.command(name="leaderboard")
+@bot.command(name="leaderboard", aliases=["lb"])
 # Add other decorators as needed
 async def leaderboard(ctx: commands.Context):
     """
@@ -986,7 +986,7 @@ async def compute_user_score(id_user: int, id_quiz_type: int):
     return round(float(nb_points), 2)
 
 
-@bot.command(name="legacyleaderboard", aliases=["ll"])
+@bot.command(name="legacyleaderboard", aliases=["llb"])
 # Add other decorators as needed
 async def legacy_leaderboard(ctx: commands.Context):
     """
@@ -1301,7 +1301,7 @@ class NewQuizView(discord.ui.View):
 
 
 @commands.check(lambda ctx: is_server_admin(ctx, session=bot.session))
-@bot.command()
+@bot.command(aliases=["sc"])
 async def setchannel(ctx):
     """*Server Admin only* - Set the current channel as the quiz main channel for this server."""
 
@@ -1332,7 +1332,7 @@ async def setchannel(ctx):
 
 
 @commands.check(lambda ctx: is_server_admin(ctx, session=bot.session))
-@bot.command()
+@bot.command(aliases=["usc"])
 async def unsetchannel(ctx):
     """*Server Admin only* - Unset the current channel as the quiz main channel for this server."""
 
