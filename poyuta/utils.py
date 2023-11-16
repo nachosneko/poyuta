@@ -308,7 +308,7 @@ def extract_hash_from_discord_pfp_url(pfp_url: str) -> str:
     return pfp_url.split("/")[-1].split(".")[0]
 
 
-def get_user_from_id(
+def get_user(
     session: Session,
     user: Interaction.user,
     add_if_not_exist: bool = True,
@@ -362,6 +362,26 @@ def get_user_from_id(
         session.commit()
 
     return db_user
+
+
+def get_user_from_id(session: Session, user_id: int):
+    """Get the user from the database from its discord ID.
+
+    Parameters
+    ----------
+    session : Session
+        Database session.
+
+    user_id : int
+        Discord user ID.
+
+    Returns
+    -------
+    User
+        User from the database.
+    """
+
+    return session.query(User).filter(User.id == user_id).first()
 
 
 def get_quiz_type_choices(session: Session) -> List[Tuple[int, str]]:
