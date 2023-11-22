@@ -428,13 +428,16 @@ async def answer_quiz_type(
             is_bonus_point=False,
         )
 
+        answer = answer.replace('"', "")
+        quiz_answer = quiz.answer.replace('"', "")
+
         # Generate a pattern to match with the correct answer
         user_answer_pattern = process_user_input(
             input_str=answer, partial_match=False, swap_words=True
         )
 
         # If the pattern matches: the answer is correct
-        if re.search(user_answer_pattern, quiz.answer, re.IGNORECASE):
+        if re.search(user_answer_pattern, quiz_answer, re.IGNORECASE):
             # if they don't have a bonus point yet
             if not has_correct_bonus and quiz.bonus_answer:
                 bonus_point_feedback = f" (you can also try to get the bonus point using `!{quiz_type_name.lower()}anime ||your answer||`)"
@@ -675,18 +678,21 @@ async def answer_bonus_quiz(
             is_correct=False,
         )
 
+        answer = answer.replace('"', "")
+        quiz_bonus_answer = quiz.bonus_answer.replace('"', "")
+
         user_bonus_answer_pattern = process_user_input(
             input_str=answer, partial_match=False, swap_words=True
         )
 
-        if re.search(user_bonus_answer_pattern, quiz.bonus_answer, re.IGNORECASE):
+        if re.search(user_bonus_answer_pattern, quiz_bonus_answer, re.IGNORECASE):
             new_answer.is_bonus_point = True
             session.add(new_answer)
             session.commit()
 
             embed.add_field(
                 name="Answer",
-                value=f"✅ Correct in {answer_time}s! +1 bonus anime point!",
+                value=f"✅ Correct in {answer_time}s!",
                 inline=True,
             )
 
@@ -829,7 +835,7 @@ async def generate_stats_embed_content(
         correct_bonus = [answer for answer in answers if answer.is_bonus_point]
         embed.add_field(
             name="> :dart: Guess Rate",
-            value=f"> {guess_rate}% ({len(correct_answers)}/{len(played_quizzes)}) + {len(correct_bonus)} bonus points",
+            value=f"> {guess_rate}% ({len(correct_answers)}/{len(played_quizzes)}) + {len(correct_bonus)} correct anime",
             inline=True,
         )
 
@@ -1221,7 +1227,7 @@ async def history(interaction: discord.Interaction):
         quiz_types = session.query(QuizType).all()
 
         embed = discord.Embed(
-            title="Today's Historic",
+            title="Today's History",
             color=0xBBE6F3,
         )
 
