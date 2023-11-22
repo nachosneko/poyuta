@@ -312,6 +312,8 @@ async def answer_quiz_type(
 
     answer_time = datetime.now()
 
+    answer = answer.replace('"', "")
+
     # remove spoiler tags if present
     answer = re.sub(r"\|\|", "", answer)
     answer = answer.strip()
@@ -428,7 +430,6 @@ async def answer_quiz_type(
             is_bonus_point=False,
         )
 
-        answer = answer.replace('"', "")
         quiz_answer = quiz.answer.replace('"', "")
 
         # Generate a pattern to match with the correct answer
@@ -557,6 +558,8 @@ async def answer_bonus_quiz(
 
     answer_time = datetime.now()
 
+    answer = answer.replace('"', "")
+
     # remove spoiler tags if present
     answer = re.sub(r"\|\|", "", answer)
     answer = answer.strip()
@@ -678,7 +681,6 @@ async def answer_bonus_quiz(
             is_correct=False,
         )
 
-        answer = answer.replace('"', "")
         quiz_bonus_answer = quiz.bonus_answer.replace('"', "")
 
         user_bonus_answer_pattern = process_user_input(
