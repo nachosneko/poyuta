@@ -145,7 +145,7 @@ async def help(ctx, command: str = None):
     )
     embed.add_field(
         name="",
-        value=f"```{config['COMMAND_PREFIX']}maleanime ||my answer||```",
+        value=f"```{config['COMMAND_PREFIX']}malecharacter ||my answer||```",
         inline=False,
     )
     embed.add_field(
@@ -155,7 +155,7 @@ async def help(ctx, command: str = None):
     )
     embed.add_field(
         name="",
-        value=f"```{config['COMMAND_PREFIX']}femaleanime ||my answer||```",
+        value=f"```{config['COMMAND_PREFIX']}femalecharacter ||my answer||```",
         inline=False,
     )
     embed.add_field(
@@ -380,7 +380,7 @@ async def answer_quiz_type(
             if quiz.bonus_answer and not has_correct_bonus:
                 embed.add_field(
                     name="Invalid",
-                    value=f"You have already answered correctly for today's {quiz_type_name} quiz.\nBut you haven't answered the bonus anime point yet. Use `!{quiz_type_name.lower()}anime ||your answer||` to answer it.",
+                    value=f"You have already answered correctly for today's {quiz_type_name} quiz.\nBut you haven't answered the bonus character point yet. Use `!{quiz_type_name.lower()}character ||your answer||` to answer it.",
                     inline=True,
                 )
 
@@ -441,7 +441,7 @@ async def answer_quiz_type(
         if re.search(user_answer_pattern, quiz_answer, re.IGNORECASE):
             # if they don't have a bonus point yet
             if not has_correct_bonus and quiz.bonus_answer:
-                bonus_point_feedback = f" (you can also try to get the bonus point using `!{quiz_type_name.lower()}anime ||your answer||`)"
+                bonus_point_feedback = f" (you can also try to get the bonus point using `!{quiz_type_name.lower()}character ||your answer||`)"
             else:
                 bonus_point_feedback = ""
 
@@ -481,17 +481,17 @@ async def answer_quiz_type(
             return
 
 
-# --- Answering anime --- #
+# --- Answering character --- #
 
 
-@bot.command(name="maleanime", aliases=["ma"])
+@bot.command(name="malecharacter", aliases=["mc", "ma", "maleanime"])
 # Add other decorators as needed
 async def male_bonus_answer_quiz(
     ctx: commands.Context,
     *answer: str,
 ):
     """
-    Answer today's male seiyuu bonus anime quiz.
+    Answer today's male seiyuu bonus character quiz.
     Please use ||spoiler tags|| to hide your answer.
 
     Arguments
@@ -501,7 +501,7 @@ async def male_bonus_answer_quiz(
 
     Examples
     ---------
-    !maleanime ||your answer||
+    !malecharacter ||your answer||
     !ma ||your answer||
     """
 
@@ -516,14 +516,14 @@ async def male_bonus_answer_quiz(
     )
 
 
-@bot.command(name="femaleanime", aliases=["fa"])
+@bot.command(name="femalecharacter", aliases=["fc", "fa", "femaleanime"])
 # Add other decorators as needed
 async def female_bonus_answer_quiz(
     ctx: commands.Context,
     *answer: str,
 ):
     """
-    Answer today's female seiyuu bonus anime quiz.
+    Answer today's female seiyuu bonus character quiz.
     Please use ||spoiler tags|| to hide your answer.
 
     Arguments
@@ -533,8 +533,8 @@ async def female_bonus_answer_quiz(
 
     Examples
     ---------
-    !femaleanime ||your answer||
-    !fa ||your answer||
+    !femalecharacter ||your answer||
+    !fc ||your answer||
     """
 
     # edit their message to hide the answer
@@ -554,7 +554,7 @@ async def answer_bonus_quiz(
     quiz_type_name: str,
     answer: str,
 ):
-    """try to get the bonus anime point once you have answered the quiz correctly."""
+    """try to get the bonus character point once you have answered the quiz correctly."""
 
     answer_time = datetime.now()
 
@@ -610,7 +610,7 @@ async def answer_bonus_quiz(
         if not quiz.bonus_answer:
             embed.add_field(
                 name="Invalid",
-                value=f"There is no bonus anime point for today's {quiz_type_name} quiz.",
+                value=f"There is no bonus character point for today's {quiz_type_name} quiz.",
                 inline=True,
             )
 
@@ -651,7 +651,7 @@ async def answer_bonus_quiz(
         if has_correct_bonus:
             embed.add_field(
                 name="Invalid",
-                value=f"You have already answered the bonus anime point for today's {quiz_type_name} quiz.",
+                value=f"You have already answered the bonus character point for today's {quiz_type_name} quiz.",
                 inline=True,
             )
 
@@ -707,7 +707,7 @@ async def answer_bonus_quiz(
 
             embed.add_field(
                 name="Answer",
-                value="❌ Incorrect! Still no bonus anime point for you :disappointed_relieved:",
+                value="❌ Incorrect! Still no bonus character point for you :disappointed_relieved:",
                 inline=True,
             )
             await ctx.send(embed=embed)
@@ -837,7 +837,7 @@ async def generate_stats_embed_content(
         correct_bonus = [answer for answer in answers if answer.is_bonus_point]
         embed.add_field(
             name="> :dart: Guess Rate",
-            value=f"> {guess_rate}% ({len(correct_answers)}/{len(played_quizzes)}) + {len(correct_bonus)} correct anime",
+            value=f"> {guess_rate}% ({len(correct_answers)}/{len(played_quizzes)}) + {len(correct_bonus)} correct character(s)",
             inline=True,
         )
 
@@ -925,7 +925,7 @@ async def generate_stats_embed_content(
         )
 
     embed.add_field(
-        name="__Fastest guesses__",
+        name="__Fastest Guesses__",
         value=fastest_answers,
         inline=True,
     )
@@ -941,10 +941,10 @@ async def leaderboard(ctx: commands.Context):
 
     Score is computed as follows :
     - 1 point for each correct answer
-    - 0.5 point for each bonus anime point
+    - 0.5 point for each bonus character point
     - if there has been more than 5 attempts before getting a correct answer : 0.5 points
     - if there has been more than 8 attempts before getting a correct answer : 0.25 points
-    - if there has been more than 3 attempts before getting a correct bonus anime : 0.25 points
+    - if there has been more than 3 attempts before getting a correct bonus character : 0.25 points
 
     Examples
     ---------
@@ -1015,7 +1015,7 @@ async def leaderboard(ctx: commands.Context):
 # Add other decorators as needed
 async def leaderboard(ctx: commands.Context):
     """
-    Basically the same leardboard as the main one, except it doesn't take into account the bonus anime points.
+    Basically the same leardboard as the main one, except it doesn't take into account the bonus character points.
 
     Examples
     ---------
@@ -1100,10 +1100,10 @@ async def compute_user_score(
 
     Score is computed as follows :
     - 1 point for each correct answer
-    - 0.5 point for each bonus anime point
+    - 0.5 point for each bonus character point
     - if there has been more than 5 attempts before getting a correct answer : 0.5 points
     - if there has been more than 8 attempts before getting a correct answer : 0.25 points
-    - if there has been more than 3 attempts before getting a correct bonus anime : 0.25 points
+    - if there has been more than 3 attempts before getting a correct bonus character : 0.25 points
 
     Parameters
     ----------
@@ -1150,7 +1150,7 @@ async def compute_user_score(
         if not bonus_points:
             return round(float(nb_points), 2)
 
-        # Bonus Anime Points
+        # Bonus Character Points
         correct_bonus_answers = (
             session.query(Answer)
             .join(Quiz)
@@ -1617,7 +1617,7 @@ class NewQuizButton(discord.ui.Button):
             if current_quiz.bonus_answer:
                 embed.add_field(
                     name="",
-                    value=f"There is a bonus anime point for this quiz. Try to get it once you guessed the seiyuu.",
+                    value=f"There is a bonus character point for this quiz. Try to get it once you guessed the seiyuu.",
                     inline=False,
                 )
 
@@ -1715,7 +1715,7 @@ async def postquizbuttons(ctx):
     quiz_type="type of the quiz to update",
     new_clip="input new clip",
     new_answer="input new seiyuu",
-    new_bonus_answer="The bonus anime answer for the quiz",
+    new_bonus_answer="The bonus character answer for the quiz",
 )
 async def new_quiz(
     interaction: discord.Interaction,
@@ -1854,7 +1854,7 @@ async def planned_quizzes(interaction: discord.Interaction):
     quiz_type="type of the quiz to update",
     new_clip="input new clip",
     new_answer="input new seiyuu",
-    new_bonus_answer="The bonus anime answer for the quiz (e.g. the anime or the song name)",
+    new_bonus_answer="The bonus character answer for the quiz (e.g. the character or the song name)",
 )
 async def update_quiz(
     interaction: discord.Interaction,
