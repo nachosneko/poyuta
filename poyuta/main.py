@@ -933,6 +933,177 @@ async def generate_stats_embed_content(
     return embed
 
 
+@bot.command(name="myguesses", aliases=["mg", "guesses", "g"])
+# Add other decorators as needed
+async def my_guesses(ctx: commands.Context, user_id: Optional[int] = None):
+    """
+    Get your stats.
+
+    Examples
+    ---------
+    !myguesses
+    !mg
+    !guesses
+    !g
+    """
+
+    with bot.session as session:
+        # get the user
+
+        user = (
+            get_user(session=session, user=ctx.author, add_if_not_exist=True)
+            if not user_id
+            else get_user_from_id(session=session, user_id=user_id)
+        )
+
+        if not user:
+            await ctx.send(f"{ctx.author.mention} You don't have any guesses yet.")
+            return
+
+        # create the embed object
+        embed = discord.Embed(title="")
+
+        # set the author
+        embed.set_author(name=ctx.author.name, icon_url=ctx.author.avatar.url)
+
+        quiz_types = session.query(QuizType).all()
+        for quiz_type in quiz_types:
+            embed.add_field(
+                name=f"{quiz_type.emoji} {quiz_type.type}", value="", inline=False
+            )
+
+            # generate the embed content for this quiz_type
+            embed = await generate_stats_embed_content(
+                session=session,
+                embed=embed,
+                user_id=user.id,
+                quiz_type=quiz_type,
+                daily_quiz_reset_time=DAILY_QUIZ_RESET_TIME,
+            )
+
+            # Linebreak unless last quiz type
+            if quiz_type != quiz_types[-1]:
+                embed.add_field(name="\u200b", value="", inline=False)
+
+    await ctx.send(embed=embed)
+
+
+async def generate_stats_embed_content(
+    session: Session,
+    embed: Embed,
+    user_id: int,
+    quiz_type: Quiz,
+    daily_quiz_reset_time: time,
+):
+    """Generate the stats embed content.
+
+    Parameters
+    ----------
+    session : Session
+        Database session.
+
+    embed : Embed
+        Embed to fill.
+
+    answers : list[Answer]
+        List of answers to process.
+
+    Returns
+    -------
+    Embed
+        Filled embed.
+    """
+
+    current_quiz_date = get_current_quiz_date(daily_quiz_reset_time)
+
+    with session as session:
+        # Get the answers for this type
+
+        played_quizzes = (
+            session.query(Quiz)
+            .join(UserStartQuizTimestamp)
+            .filter(
+                Quiz.id_type == quiz_type.id,
+                UserStartQuizTimestamp.user_id == user_id,
+            )
+        ).all()
+
+        # Correct Quizzes
+        correct_quizzes = (
+            session.query(Quiz)
+            .join(Answer)
+            .filter(
+                Quiz.id_type == quiz_type.id,
+                Answer.user_id == user_id,
+                Answer.is_correct,
+            )
+        ).all()
+
+        # Correct Answers
+        answers = (
+            session.query(Answer)
+            .join(Quiz)
+            .filter(Answer.user_id == user_id, Quiz.id_type == quiz_type.id)
+            .all()
+        )
+
+        correct_answers = [answer for answer in answers if answer.is_correct]
+
+        # Display all guessed stats for each quiz type
+        correct_bonus = [answer for answer in answers if answer.is_bonus_point]
+        embed.add_field(
+            name="> :dart: Correct Answers",
+            value=f"> {len(correct_answers)} + {len(correct_bonus)} correct character(s)",
+            inline=True,
+        )
+
+        embed.add_field(name="", value="", inline=False)
+
+        # Fastest Guesses for this user
+        fastest_answers = (
+            session.query(Answer)
+            .join(Quiz)
+            .filter(
+                Answer.user_id == user_id,
+                Quiz.id_type == quiz_type.id,
+                Quiz.date < current_quiz_date,
+                Answer.is_correct,
+            )
+            .order_by(Answer.answer_time)
+            .all()
+        )
+
+        medals = [":first_place:", ":second_place:", ":third_place:"]
+
+        nb_attempts = []
+        for fastest_answer in fastest_answers:
+            nb_attempts.append(
+                session.query(Answer)
+                .filter(
+                    Answer.user_id == fastest_answer.user_id,
+                    Answer.quiz_id == fastest_answer.quiz_id,
+                    Answer.answer != "\\Bonus Answer\\",
+                )
+                .count()
+            )
+
+        fastest_answers = "\n\n".join(
+            [
+                f"{medals[i]} | **{answer.answer_time}s** : {answer.answer} in {nb_attempts[i]} attempts on {answer.quiz.date}"
+                for i, answer in enumerate(fastest_answers)
+            ]
+        )
+
+    embed.add_field(
+        name="__Top Guesses__",
+        value=fastest_answers,
+        inline=True,
+    )
+
+    return embed
+
+
+
 @bot.command(name="leaderboard", aliases=["lb"])
 # Add other decorators as needed
 async def leaderboard(ctx: commands.Context):
@@ -991,7 +1162,7 @@ async def leaderboard(ctx: commands.Context):
             ):
                 index = page_start + i
                 rank = f"{medals[index]} " if index < 3 else f"#{index + 1}: "
-                value += f"> {rank} <@{id_user}>: {user_scores[quiz_type.type][id_user]} points\n"
+                value += f"> {rank} <@{id_user}> - {user_scores[quiz_type.type][id_user]} points\n"
             embed.add_field(
                 name=f"> {quiz_type.emoji} {quiz_type.type}", value=value, inline=True
             )
@@ -1002,7 +1173,7 @@ async def leaderboard(ctx: commands.Context):
         ):
             index = page_start + i
             rank = f"{medals[index]} " if index < 3 else f"#{index + 1}: "
-            value += f"> {rank} <@{id_user}>: {user_scores['total'][id_user]} points\n"
+            value += f"> {rank} <@{id_user}> - {user_scores['total'][id_user]} points\n"
         embed.add_field(name="> Global Leaderboard", value=value, inline=False)
 
         pages.append(embed)
@@ -1062,7 +1233,7 @@ async def leaderboard(ctx: commands.Context):
             ):
                 index = page_start + i
                 rank = f"{medals[index]} " if index < 3 else f"#{index + 1}: "
-                value += f"> {rank} <@{id_user}>: {user_scores[quiz_type.type][id_user]} points\n"
+                value += f"> {rank} <@{id_user}> - {user_scores[quiz_type.type][id_user]} points\n"
             embed.add_field(
                 name=f"> {quiz_type.emoji} {quiz_type.type}", value=value, inline=True
             )
@@ -1073,7 +1244,7 @@ async def leaderboard(ctx: commands.Context):
         ):
             index = page_start + i
             rank = f"{medals[index]} " if index < 3 else f"#{index + 1}: "
-            value += f"> {rank} <@{id_user}>: {user_scores['total'][id_user]} points\n"
+            value += f"> {rank} <@{id_user}> - {user_scores['total'][id_user]} points\n"
         embed.add_field(name="> Global Leaderboard", value=value, inline=False)
 
         pages.append(embed)
@@ -1210,7 +1381,7 @@ async def legacy_leaderboard(ctx: commands.Context):
             discord_id, male, female, overall = line.split(" ")
 
             rank = f"{medals[i]} " if i < 3 else f"`#{i + 1}: `"
-            value += f"> {rank} <@{discord_id}>: {overall} ({male}m + {female}f)\n"
+            value += f"> {rank} <@{discord_id}> - {overall} ({male}m + {female}f)\n"
 
     embed.add_field(name="> Global Leaderboard", value=value, inline=False)
 
