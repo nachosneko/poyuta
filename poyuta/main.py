@@ -4,11 +4,14 @@ import random
 import numpy as np
 from datetime import datetime, date, timedelta, time
 from typing import Optional
+from typing import List
+
 
 # Discord
 import discord
 from discord import app_commands, Embed, Button, ButtonStyle
 from discord.ext import commands
+from discord.ext.commands import Context
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 
@@ -140,22 +143,22 @@ async def help(ctx, command: str = None):
     # General Commands
     embed.add_field(
         name=f"> **General Commands:**",
-        value=f"```{config['COMMAND_PREFIX']}male ||my answer||```",
+        value=f"```{config['COMMAND_PREFIX']}male ||my_answer||```",
         inline=False,
     )
     embed.add_field(
         name="",
-        value=f"```{config['COMMAND_PREFIX']}malecharacter ||my answer||```",
+        value=f"```{config['COMMAND_PREFIX']}malecharacter ||my_answer||```",
         inline=False,
     )
     embed.add_field(
         name="",
-        value=f"```{config['COMMAND_PREFIX']}female ||my answer||```",
+        value=f"```{config['COMMAND_PREFIX']}female ||my_answer||```",
         inline=False,
     )
     embed.add_field(
         name="",
-        value=f"```{config['COMMAND_PREFIX']}femalecharacter ||my answer||```",
+        value=f"```{config['COMMAND_PREFIX']}femalecharacter ||my_answer||```",
         inline=False,
     )
     embed.add_field(
@@ -165,6 +168,12 @@ async def help(ctx, command: str = None):
     )
     embed.add_field(
         name="", value=f"```{config['COMMAND_PREFIX']}mystats```", inline=False
+    )
+    embed.add_field(
+        name="", value=f"```{config['COMMAND_PREFIX']}myguesses```", inline=False
+    )
+    embed.add_field(
+        name="", value=f"```{config['COMMAND_PREFIX']}topspeed```", inline=False
     )
     embed.add_field(
         name="", value=f"```{config['COMMAND_PREFIX']}leaderboard```", inline=False
@@ -932,10 +941,9 @@ async def generate_stats_embed_content(
 
     return embed
 
-
 @bot.command(name="myguesses", aliases=["mg", "guesses", "g"])
 # Add other decorators as needed
-async def my_guesses(ctx: commands.Context, user_id: Optional[int] = None):
+async def my_guesses(ctx: Context, user_id: Optional[int] = None):
     """
     Get your stats.
 
@@ -949,7 +957,6 @@ async def my_guesses(ctx: commands.Context, user_id: Optional[int] = None):
 
     with bot.session as session:
         # get the user
-
         user = (
             get_user(session=session, user=ctx.author, add_if_not_exist=True)
             if not user_id
@@ -960,32 +967,27 @@ async def my_guesses(ctx: commands.Context, user_id: Optional[int] = None):
             await ctx.send(f"{ctx.author.mention} You don't have any guesses yet.")
             return
 
-        # create the embed object
-        embed = discord.Embed(title="")
-
-        # set the author
-        embed.set_author(name=ctx.author.name, icon_url=ctx.author.avatar.url)
-
         quiz_types = session.query(QuizType).all()
+        mgpages = []
+
         for quiz_type in quiz_types:
-            embed.add_field(
-                name=f"{quiz_type.emoji} {quiz_type.type}", value="", inline=False
-            )
+            # create the embed object for each quiz type
+            embed = discord.Embed(title=f"Top Guesses for {quiz_type.type}")
+            embed.set_author(name=ctx.author.name, icon_url=ctx.author.avatar.url)
 
             # generate the embed content for this quiz_type
-            embed = await generate_guesses_embed_content(
+            await generate_guesses_embed_content(
                 session=session,
                 embed=embed,
                 user_id=user.id,
                 quiz_type=quiz_type,
                 daily_quiz_reset_time=DAILY_QUIZ_RESET_TIME,
+                mgpages=mgpages,
+                ctx=ctx,  # Pass ctx to the generator
             )
 
-            # Linebreak unless last quiz type
-            if quiz_type != quiz_types[-1]:
-                embed.add_field(name="\u200b", value="", inline=False)
-
-    await ctx.send(embed=embed)
+        paginator = EmbedPaginatorSession(ctx, *mgpages)
+        await paginator.run()
 
 
 async def generate_guesses_embed_content(
@@ -994,6 +996,8 @@ async def generate_guesses_embed_content(
     user_id: int,
     quiz_type: Quiz,
     daily_quiz_reset_time: time,
+    mgpages: List[Embed],
+    ctx: Context,
 ):
     """Generate the stats embed content.
 
@@ -1005,13 +1009,25 @@ async def generate_guesses_embed_content(
     embed : Embed
         Embed to fill.
 
-    answers : list[Answer]
-        List of answers to process.
+    user_id : int
+        User ID.
+
+    quiz_type : Quiz
+        Quiz type.
+
+    daily_quiz_reset_time : time
+        Time of daily quiz reset.
+
+    mgpages : List[Embed]
+        List to store pages.
+
+    ctx : Context
+        Discord context.
 
     Returns
     -------
-    Embed
-        Filled embed.
+    List[Embed]
+        List of filled embeds.
     """
 
     current_quiz_date = get_current_quiz_date(daily_quiz_reset_time)
@@ -1064,7 +1080,7 @@ async def generate_guesses_embed_content(
         )
 
         medals = [":first_place:", ":second_place:", ":third_place:"]
-
+        quiz_types = session.query(QuizType).all()
         nb_attempts = []
         for fastest_answer in fastest_answers:
             nb_attempts.append(
@@ -1077,20 +1093,67 @@ async def generate_guesses_embed_content(
                 .count()
             )
 
-        fastest_answers = "\n\n".join(
-            [
-                f"{medals[i] if i < len(medals) else '#' + str(i + 1)} | **{answer.answer_time}s** - {answer.answer} in {nb_attempts[i] if i < len(nb_attempts) else 'Unknown Attempts'} attempt(s) on {answer.quiz.date}"
-                for i, answer in enumerate(fastest_answers)
-            ]
+        for page_start in range(0, len(fastest_answers), 10):
+            embed = discord.Embed(title=f"Top Guesses for {quiz_type.type}")
+            embed.set_author(name=ctx.author.name, icon_url=ctx.author.avatar.url)
+
+            page_end = np.min([page_start + 10, len(fastest_answers)])
+
+            for i, answer in enumerate(fastest_answers[page_start:page_end], start=page_start):
+                    rank = f"{medals[i % 3]} " if i < 3 else f"#{i + 1} "
+                    value = f"{rank} | **{answer.answer_time}s** - {answer.answer} in {nb_attempts[i] if i < len(nb_attempts) else 'Unknown Attempts'} attempt(s) on {answer.quiz.date}"
+                    embed.add_field(
+                        name=f"", value=value, inline=False
+                    )
+            mgpages.append(embed)
+
+@bot.command(name="topspeed", aliases=["tops"])
+# Add other decorators as needed
+async def topspeed(ctx: commands.Context):
+    """
+    Display the top speed guesses.
+
+    Examples
+    ---------
+    !topspeed
+    !tops
+    """
+
+    with bot.session as session:
+        answers = session.query(Answer).all()
+        medals = [":first_place:", ":second_place:", ":third_place:"]
+
+        if not answers:
+            await ctx.send(f"No valid answers found.")
+            return
+
+        # Get the fastest answers for this quiz type
+        fastest_answers = (
+            session.query(Answer)
+            .filter(
+                Answer.is_correct,
+                Answer.answer != "\\Bonus Answer\\",
+            )
+            .order_by(Answer.answer_time)
+            .all()
         )
 
-    embed.add_field(
-        name="__Top Guesses__",
-        value=fastest_answers,
-        inline=True,
-    )
+    toppages = []
+    for page_start in range(0, len(fastest_answers), 20):
+        embed = discord.Embed(title="Top Speed Guesses")
 
-    return embed
+        page_end = min(page_start + 20, len(fastest_answers))
+
+        for i, answer in enumerate(fastest_answers[page_start:page_end], start=page_start):
+            rank = f"{medals[i % 3]} " if i < 3 else f"#{i + 1} "
+            value = f"{rank} | **{answer.answer_time}s** - {answer.answer} by <@{answer.user_id}>"
+            embed.add_field(
+                name=f"", value=value, inline=False
+            )
+        toppages.append(embed)
+    
+    session = EmbedPaginatorSession(ctx, *toppages)
+    await session.run()
 
 
 
