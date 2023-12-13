@@ -410,7 +410,7 @@ async def answer_quiz_type(
         if not start_quiz_timestamp:
             embed.add_field(
                 name="Invalid",
-                value=f"You haven't started the {quiz_type_name} quiz yet. How would you know the answer? :HMM:",
+                value=f"You haven't started the {quiz_type_name} quiz yet. How would you know the answer? <:worrystare:1184497003267358953>",
                 inline=True,
             )
 
@@ -837,7 +837,7 @@ async def generate_stats_embed_content(
         correct_bonus = [answer for answer in answers if answer.is_bonus_point]
         embed.add_field(
             name="> :dart: Guess Rate",
-            value=f"> {guess_rate}% ({len(correct_answers)}/{len(played_quizzes)}) + {len(correct_bonus)} correct character(s)",
+            value=f"> {guess_rate}% ({len(correct_answers)}/{len(played_quizzes)}) + {len(correct_bonus)} character(s)",
             inline=True,
         )
 
@@ -919,7 +919,7 @@ async def generate_stats_embed_content(
 
         fastest_answers = "\n\n".join(
             [
-                f"{medals[i]} | **{answer.answer_time}s** : {answer.answer} in {nb_attempts[i]} attempts on {answer.quiz.date}"
+                f"{medals[i]} | **{answer.answer_time}s** - {answer.answer} in {nb_attempts[i]} attempts on {answer.quiz.date}"
                 for i, answer in enumerate(fastest_answers)
             ]
         )
@@ -973,7 +973,7 @@ async def my_guesses(ctx: commands.Context, user_id: Optional[int] = None):
             )
 
             # generate the embed content for this quiz_type
-            embed = await generate_stats_embed_content(
+            embed = await generate_guesses_embed_content(
                 session=session,
                 embed=embed,
                 user_id=user.id,
@@ -988,7 +988,7 @@ async def my_guesses(ctx: commands.Context, user_id: Optional[int] = None):
     await ctx.send(embed=embed)
 
 
-async def generate_stats_embed_content(
+async def generate_guesses_embed_content(
     session: Session,
     embed: Embed,
     user_id: int,
@@ -1039,22 +1039,12 @@ async def generate_stats_embed_content(
             )
         ).all()
 
-        # Correct Answers
+        # Correct Total
         answers = (
             session.query(Answer)
             .join(Quiz)
             .filter(Answer.user_id == user_id, Quiz.id_type == quiz_type.id)
             .all()
-        )
-
-        correct_answers = [answer for answer in answers if answer.is_correct]
-
-        # Display all guessed stats for each quiz type
-        correct_bonus = [answer for answer in answers if answer.is_bonus_point]
-        embed.add_field(
-            name="> :dart: Correct Answers",
-            value=f"> {len(correct_answers)} + {len(correct_bonus)} correct character(s)",
-            inline=True,
         )
 
         embed.add_field(name="", value="", inline=False)
@@ -1089,7 +1079,7 @@ async def generate_stats_embed_content(
 
         fastest_answers = "\n\n".join(
             [
-                f"{medals[i]} | **{answer.answer_time}s** : {answer.answer} in {nb_attempts[i]} attempts on {answer.quiz.date}"
+                f"{medals[i] if i < len(medals) else '#' + str(i + 1)} | **{answer.answer_time}s** - {answer.answer} in {nb_attempts[i] if i < len(nb_attempts) else 'Unknown Attempts'} attempt(s) on {answer.quiz.date}"
                 for i, answer in enumerate(fastest_answers)
             ]
         )
@@ -1110,12 +1100,12 @@ async def leaderboard(ctx: commands.Context):
     """
     Display the leaderboards.
 
-    Score is computed as follows :
+    Score is computed as follows:
     - 1 point for each correct answer
     - 0.5 point for each bonus character point
-    - if there has been more than 5 attempts before getting a correct answer : 0.5 points
-    - if there has been more than 8 attempts before getting a correct answer : 0.25 points
-    - if there has been more than 3 attempts before getting a correct bonus character : 0.25 points
+    - if there has been more than 5 attempts before getting a correct answer: 0.5 points
+    - if there has been more than 8 attempts before getting a correct answer: 0.25 points
+    - if there has been more than 3 attempts before getting a correct bonus character: 0.25 points
 
     Examples
     ---------
@@ -1269,12 +1259,12 @@ async def compute_user_score(
     """
     Compute the score of a user for a given quiz type.
 
-    Score is computed as follows :
+    Score is computed as follows:
     - 1 point for each correct answer
     - 0.5 point for each bonus character point
-    - if there has been more than 5 attempts before getting a correct answer : 0.5 points
-    - if there has been more than 8 attempts before getting a correct answer : 0.25 points
-    - if there has been more than 3 attempts before getting a correct bonus character : 0.25 points
+    - if there has been more than 5 attempts before getting a correct answer: 0.5 points
+    - if there has been more than 8 attempts before getting a correct answer: 0.25 points
+    - if there has been more than 3 attempts before getting a correct bonus character: 0.25 points
 
     Parameters
     ----------
