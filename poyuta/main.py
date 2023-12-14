@@ -2139,3 +2139,68 @@ async def update_quiz(
         await interaction.response.send_message(
             f"{quiz_type.name} quiz updated for {quiz_date}."
         )
+
+# Command to edit answers
+@bot.tree.command(name="editanswer")
+@app_commands.describe(
+    user_id="which user to edit",
+    answer="which answer to edit",
+    answer_time="which answer time to edit",
+    new_answer="new answer (optional)",
+    new_answer_time="time to edit",
+    is_correct="is correct or not",
+)
+async def edit_answer(
+    interaction: discord.Interaction,
+    user_id: str,
+    answer: str,
+    answer_time: str,
+    new_answer: Optional[str] = None,
+    new_answer_time: Optional[str] = None,
+    is_correct: Optional[bool] = None,
+):
+    """*Bot Admin only* - edit an answer and/or time."""
+    
+    # Check if the user invoking the command is an admin
+    with bot.session as session:
+        if not is_bot_admin(session=session, user=interaction.user):
+            await interaction.response.send_message(
+                "You are not an admin, you can't use this command."
+            )
+            return
+    
+    # Access the database
+    with SessionFactory() as session:
+        # Retrieve the answer to be edited based on user_id, answer, and answer_time
+        answer_obj = (
+            session.query(Answer)
+            .filter_by(user_id=user_id, answer=answer, answer_time=answer_time)
+            .first()
+        )
+
+        # Check if the result is None
+        if answer_obj is None:
+            await interaction.response.send_message("Answer not found.")
+            return
+
+        # Update the answer if new_answer is provided
+        if new_answer is not None:
+            answer_obj.answer = new_answer
+
+        # Update other optional fields
+        if new_answer_time is not None:
+            answer_obj.answer_time = float(new_answer_time)
+        if is_correct is not None:
+            answer_obj.is_correct = is_correct
+
+        session.commit()
+
+        await interaction.response.send_message(f"Answer for user {user_id}, answer {answer}, and time {answer_time} updated.")
+
+# Helper function to check if a user is an admin
+def is_bot_admin(session, user):
+    try:
+        user_obj = session.query(User).filter_by(id=user.id, is_admin=True).first()
+        return user_obj is not None
+    except Exception as e:
+        return False
