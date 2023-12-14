@@ -1128,10 +1128,13 @@ async def topspeed(ctx: commands.Context):
             return
 
         # Get the fastest answers for this quiz type
+        current_quiz_date = get_current_quiz_date(DAILY_QUIZ_RESET_TIME)
         fastest_answers = (
             session.query(Answer)
+            .join(Quiz)
             .filter(
                 Answer.is_correct,
+                Quiz.date < current_quiz_date,
                 Answer.answer != "\\Bonus Answer\\",
             )
             .order_by(Answer.answer_time)
