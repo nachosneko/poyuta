@@ -2146,9 +2146,10 @@ async def update_quiz(
     user_id="which user to edit",
     answer="which answer to edit",
     answer_time="which answer time to edit",
-    new_answer="new answer (optional)",
+    new_answer="new answer",
     new_answer_time="time to edit",
     is_correct="is correct or not",
+    delete="delete the attempt",
 )
 async def edit_answer(
     interaction: discord.Interaction,
@@ -2158,8 +2159,9 @@ async def edit_answer(
     new_answer: Optional[str] = None,
     new_answer_time: Optional[str] = None,
     is_correct: Optional[bool] = None,
+    delete: Optional[bool] = False,
 ):
-    """*Bot Admin only* - edit an answer and/or time."""
+    """*Bot Admin only* - edit or delete an answer and/or time."""
     
     # Check if the user invoking the command is an admin
     with bot.session as session:
@@ -2171,7 +2173,7 @@ async def edit_answer(
     
     # Access the database
     with SessionFactory() as session:
-        # Retrieve the answer to be edited based on user_id, answer, and answer_time
+        # Retrieve the answer to be edited or deleted based on user_id, answer, and answer_time
         answer_obj = (
             session.query(Answer)
             .filter_by(user_id=user_id, answer=answer, answer_time=answer_time)
@@ -2181,6 +2183,13 @@ async def edit_answer(
         # Check if the result is None
         if answer_obj is None:
             await interaction.response.send_message("Answer not found.")
+            return
+
+        # Delete the answer if delete is True
+        if delete:
+            session.delete(answer_obj)
+            session.commit()
+            await interaction.response.send_message(f"Answer for user <@{user_id}>, answer {answer}, and time {answer_time} deleted.")
             return
 
         # Update the answer if new_answer is provided
