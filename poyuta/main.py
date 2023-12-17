@@ -2183,7 +2183,17 @@ async def edit_answer(
             .filter_by(user_id=user_id, answer=answer, answer_time=answer_time)
             .first()
         )
-
+        
+        # Get the user
+        user = (
+            get_user(session=session, user=interaction.author, add_if_not_exist=True)
+            if not user_id
+            else get_user_from_id(session=session, user_id=user_id)
+        )
+        if not user:
+            await interaction.send(f"{interaction.author.mention} This person doesn't have any guesses yet.")
+            return
+        
         # Check if the result is None
         if answer_obj is None:
             await interaction.response.send_message("Answer not found.")
@@ -2193,7 +2203,7 @@ async def edit_answer(
         if delete:
             session.delete(answer_obj)
             session.commit()
-            await interaction.response.send_message(f"Answer for user <@{user_id}>, answer {answer}, and time {answer_time} deleted.")
+            await interaction.response.send_message(f"Answer for user **{user.name}**, answer {answer}, and time {answer_time} deleted.")
             return
 
         # Update the answer if new_answer is provided
@@ -2208,7 +2218,7 @@ async def edit_answer(
 
         session.commit()
 
-        await interaction.response.send_message(f"Answer for user {user_id}, answer {answer}, and time {answer_time} updated.")
+        await interaction.response.send_message(f"Answer for user **{user.name}**, answer {answer}, and time {answer_time} updated.")
 
 # Helper function to check if a user is an admin
 def is_bot_admin(session, user):
