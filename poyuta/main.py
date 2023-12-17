@@ -1536,6 +1536,10 @@ async def post_yesterdays_quiz_results():
                 color=0xBBE6F3,
             )
 
+            embed.set_footer(
+                text=f"Quiz ID: {yesterday_quiz.id}",
+)
+
             if yesterday_quiz:
                 answer_feedback = f"> Answer: ||{yesterday_quiz.answer}||"
                 bonus_feedback = (
