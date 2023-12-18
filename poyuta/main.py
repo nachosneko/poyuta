@@ -2057,7 +2057,7 @@ async def planned_quizzes(interaction: discord.Interaction):
                 )
 
                 value = (
-                    f"[{quiz.answer}]({quiz.clip}){' + ' + quiz.bonus_answer if quiz.bonus_answer else ''}"
+                    f"||[{quiz.answer}]({quiz.clip})||{' + ||' + quiz.bonus_answer if quiz.bonus_answer else ''}||"
                     if quiz
                     else "Nothing planned :disappointed_relieved:"
                 )
