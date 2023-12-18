@@ -1929,14 +1929,14 @@ async def unsetchannel(ctx):
 @commands.check(lambda ctx: is_bot_admin(session=bot.session, user=ctx.author))
 @bot.command(aliases=["pqr"])  # for quick debugging
 async def postquizresults(ctx):
-    """**Bot Admin only** Force the bot to post yesterday's quiz results."""
+    """**Bot Admin Only** Force the bot to post yesterday's quiz results."""
     await post_yesterdays_quiz_results()
 
 
 @commands.check(lambda ctx: is_bot_admin(session=bot.session, user=ctx.author))
 @bot.command(aliases=["pqb"])  # for quick debugging
 async def postquizbuttons(ctx):
-    """**Bot Admin only** Force the bot to post yesterday's quiz results."""
+    """**Bot Admin Only** Force the bot to post yesterday's quiz results."""
     await post_quiz_buttons()
 
 
@@ -1955,7 +1955,7 @@ async def new_quiz(
     new_answer: str,
     new_bonus_answer: Optional[str] = None,
 ):
-    """**Bot Admin only** - create a new quiz."""
+    """**Bot Admin Only** - create a new quiz."""
 
     with bot.session as session:
         if not is_bot_admin(session=session, user=interaction.user):
@@ -2007,7 +2007,7 @@ async def new_quiz(
 
 @bot.tree.command(name="plannedquizzes")
 async def planned_quizzes(interaction: discord.Interaction):
-    """**Bot Admin only** - Check the planned quizzes."""
+    """**Bot Admin Only** - Check the planned quizzes."""
 
     with bot.session as session:
         if not is_bot_admin(session=session, user=interaction.user):
@@ -2078,31 +2078,34 @@ async def planned_quizzes(interaction: discord.Interaction):
         await interaction.response.send_message(embed=embed)
 
 
-@bot.tree.command(name="updatequiz")
+
+@bot.tree.command(name="editquiz")
 @app_commands.choices(quiz_type=get_quiz_type_choices(session=bot.session))
 @app_commands.describe(
     quiz_date="date of the quiz to update in YYYY-MM-DD format",
     quiz_type="type of the quiz to update",
     new_clip="input new clip",
     new_answer="input new seiyuu",
-    new_bonus_answer="the bonus character answer for the quiz",
-    clear_button_clicks="clears everyones button click for selected quiz type. only use if clip link is broken.",
+    new_bonus_answer="the bonus character answer for the quiz.",
+    clear_button_clicks="clears everyone's button clicks for the selected quiz type. only use if the clip link is broken for everyone.",
+    clear_attempts="clears everyone's attempts for the selected quiz type. only use if you want to change the seiyuu clip and answer altogether.",
 )
-async def update_quiz(
+async def edit_quiz(
     interaction: discord.Interaction,
     quiz_date: str,
     quiz_type: app_commands.Choice[int],
-    new_clip: str,
-    new_answer: str,
+    new_clip: Optional[str] = None,
+    new_answer: Optional[str] = None,
     new_bonus_answer: Optional[str] = None,
     clear_button_clicks: Optional[bool] = False,
+    clear_attempts: Optional[bool] = False,
 ):
-    """**Bot Admin only** - Update a planned quiz."""
+    """**Bot Admin Only** - Update a planned quiz."""
 
     with bot.session as session:
         if not is_bot_admin(session=session, user=interaction.user):
             await interaction.response.send_message(
-                "You are not an admin, you can't use this command."
+                "you are not an admin, you can't use this command."
             )
             return
 
@@ -2110,7 +2113,7 @@ async def update_quiz(
             quiz_date = datetime.strptime(quiz_date, "%Y-%m-%d").date()
         except ValueError:
             await interaction.response.send_message(
-                "Invalid date format. Please use YYYY-MM-DD."
+                "invalid date format. Please use YYYY-MM-DD."
             )
             return
 
@@ -2123,17 +2126,9 @@ async def update_quiz(
 
         if not quiz:
             await interaction.response.send_message(
-                f"No {quiz_type.name} quiz on {quiz_date}. Can't update it."
+                f"no {quiz_type.name} quiz on {quiz_date}. can't update it."
             )
             return
-
-        # Update attributes
-        quiz.clip = new_clip
-        quiz.answer = new_answer
-        quiz.bonus_answer = new_bonus_answer
-
-        # Commit the changes to the database
-        session.commit()
 
         if clear_button_clicks:
             # Conditionally delete rows from UserStartQuizTimestamp based on gender
@@ -2159,17 +2154,71 @@ async def update_quiz(
 
                 await interaction.response.send_message(
                     f"{quiz_type.name} quiz updated for {quiz_date}. "
-                    f"buttons click also cleared."
+                    f"button clicks also cleared."
                 )
             else:
                 await interaction.response.send_message(
                     "nothing to clear."
                 )
-        else:
-            await interaction.response.send_message(
-                f"{quiz_type.name} quiz updated for {quiz_date}."
+        if clear_attempts:
+            # Conditionally delete rows from Answer based on gender
+            # Separate conditions for male and female quiz types
+            gender_condition_answer = (
+                Answer.quiz_id
+                if quiz.type.id == 1  # Assuming 1 represents Male Seiyuu and 2 represents Female Seiyuu
+                else desc(Answer.quiz_id)
             )
 
+            latest_answer = (
+                session.query(Answer)
+                .filter_by(quiz_id=quiz.id)
+                .order_by(gender_condition_answer)
+                .limit(1)
+                .first()
+            )
+
+            if latest_answer:
+                # Filter and delete rows based on gender condition
+                session.query(Answer).filter(
+                    Answer.quiz_id == quiz.id,
+                    Answer.quiz.has(Quiz.id_type == quiz.type.id),
+                    Answer.quiz.has(Quiz.date == quiz.date),
+
+                ).delete()
+
+                # Commit the deletion to the database
+                session.commit()
+
+                await interaction.response.send_message(
+                    f"{quiz.type.type} quiz updated for {quiz.date}. "
+                    f"all attempts cleared."
+                )
+            else:
+                await interaction.response.send_message(
+                    f"{quiz.type.type} quiz updated for {quiz.date}. "
+                    f"no attempts to clear."
+                )
+
+        else:
+            # If none of the special options were selected, proceed with regular updates
+            if any([new_clip, new_answer, new_bonus_answer]):
+                # Update attributes
+                quiz.clip = new_clip if new_clip is not None else quiz.clip
+                quiz.answer = new_answer if new_answer is not None else quiz.answer
+                quiz.bonus_answer = (
+                    new_bonus_answer if new_bonus_answer is not None else quiz.bonus_answer
+                )
+
+                # Commit the changes to the database
+                session.commit()
+
+                await interaction.response.send_message(
+                    f"{quiz_type.name} quiz updated for {quiz_date}."
+                )
+            else:
+                await interaction.response.send_message(
+                    "please provide one or more of the optional values to update."
+                )
 
 # Command to edit answers
 @bot.tree.command(name="editanswer")
@@ -2192,7 +2241,7 @@ async def edit_answer(
     is_correct: Optional[bool] = None,
     delete: Optional[bool] = False,
 ):
-    """**Bot Admin only** - edit or delete an answer and/or time."""
+    """**Bot Admin Only** - edit or delete an answer and/or time."""
     
     # Check if the user invoking the command is an admin
     with bot.session as session:
