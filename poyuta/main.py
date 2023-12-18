@@ -16,7 +16,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 
 # Database
-from sqlalchemy import case, func
+from sqlalchemy import case, func, desc, or_
 from sqlalchemy.orm import joinedload
 from sqlalchemy.orm.session import Session
 from poyuta.database import (
@@ -1929,21 +1929,21 @@ async def unsetchannel(ctx):
 @commands.check(lambda ctx: is_bot_admin(session=bot.session, user=ctx.author))
 @bot.command(aliases=["pqr"])  # for quick debugging
 async def postquizresults(ctx):
-    """*Bot Admin only* Force the bot to post yesterday's quiz results."""
+    """**Bot Admin only** Force the bot to post yesterday's quiz results."""
     await post_yesterdays_quiz_results()
 
 
 @commands.check(lambda ctx: is_bot_admin(session=bot.session, user=ctx.author))
 @bot.command(aliases=["pqb"])  # for quick debugging
 async def postquizbuttons(ctx):
-    """*Bot Admin only* Force the bot to post yesterday's quiz results."""
+    """**Bot Admin only** Force the bot to post yesterday's quiz results."""
     await post_quiz_buttons()
 
 
 @bot.tree.command(name="newquiz")
 @app_commands.choices(quiz_type=get_quiz_type_choices(session=bot.session))
 @app_commands.describe(
-    quiz_type="type of the quiz to update",
+    quiz_type="type of the quiz to add",
     new_clip="input new clip",
     new_answer="input new seiyuu",
     new_bonus_answer="The bonus character answer for the quiz",
@@ -1955,7 +1955,7 @@ async def new_quiz(
     new_answer: str,
     new_bonus_answer: Optional[str] = None,
 ):
-    """*Bot Admin only* - create a new quiz."""
+    """**Bot Admin only** - create a new quiz."""
 
     with bot.session as session:
         if not is_bot_admin(session=session, user=interaction.user):
@@ -2007,7 +2007,7 @@ async def new_quiz(
 
 @bot.tree.command(name="plannedquizzes")
 async def planned_quizzes(interaction: discord.Interaction):
-    """*Bot Admin only* - Check the planned quizzes."""
+    """**Bot Admin only** - Check the planned quizzes."""
 
     with bot.session as session:
         if not is_bot_admin(session=session, user=interaction.user):
@@ -2085,7 +2085,8 @@ async def planned_quizzes(interaction: discord.Interaction):
     quiz_type="type of the quiz to update",
     new_clip="input new clip",
     new_answer="input new seiyuu",
-    new_bonus_answer="The bonus character answer for the quiz (e.g. the character or the song name)",
+    new_bonus_answer="the bonus character answer for the quiz",
+    clear_button_clicks="clears everyones button click for selected quiz type. only use if clip link is broken.",
 )
 async def update_quiz(
     interaction: discord.Interaction,
@@ -2094,8 +2095,9 @@ async def update_quiz(
     new_clip: str,
     new_answer: str,
     new_bonus_answer: Optional[str] = None,
+    clear_button_clicks: Optional[bool] = False,
 ):
-    """*Bot Admin only* - Update a planned quiz."""
+    """**Bot Admin only** - Update a planned quiz."""
 
     with bot.session as session:
         if not is_bot_admin(session=session, user=interaction.user):
@@ -2112,14 +2114,7 @@ async def update_quiz(
             )
             return
 
-        # check the date is in the future
-        if quiz_date <= get_current_quiz_date(DAILY_QUIZ_RESET_TIME):
-            await interaction.response.send_message(
-                "You can only update a quiz that hasn't happened yet. Please use a date in the future."
-            )
-            return
-
-        # check if that quiz exists for this quiz_type and quiz_date
+        # Check if that quiz exists for this quiz_type and quiz_date
         quiz = (
             session.query(Quiz)
             .filter(Quiz.id_type == quiz_type.value, Quiz.date == quiz_date)
@@ -2140,9 +2135,41 @@ async def update_quiz(
         # Commit the changes to the database
         session.commit()
 
-        await interaction.response.send_message(
-            f"{quiz_type.name} quiz updated for {quiz_date}."
-        )
+        if clear_button_clicks:
+            # Conditionally delete rows from UserStartQuizTimestamp based on gender
+            gender_condition = (
+                UserStartQuizTimestamp.timestamp
+                if quiz_type.value == 1  # Assuming 1 represents male and 2 represents female
+                else desc(UserStartQuizTimestamp.timestamp)
+            )
+
+            latest_timestamp = (
+                session.query(UserStartQuizTimestamp)
+                .filter_by(quiz_id=quiz.id)
+                .order_by(gender_condition)
+                .limit(1)
+                .first()
+            )
+
+            if latest_timestamp:
+                session.delete(latest_timestamp)
+
+                # Commit the deletion to the database
+                session.commit()
+
+                await interaction.response.send_message(
+                    f"{quiz_type.name} quiz updated for {quiz_date}. "
+                    f"buttons click also cleared."
+                )
+            else:
+                await interaction.response.send_message(
+                    "nothing to clear."
+                )
+        else:
+            await interaction.response.send_message(
+                f"{quiz_type.name} quiz updated for {quiz_date}."
+            )
+
 
 # Command to edit answers
 @bot.tree.command(name="editanswer")
@@ -2165,7 +2192,7 @@ async def edit_answer(
     is_correct: Optional[bool] = None,
     delete: Optional[bool] = False,
 ):
-    """*Bot Admin only* - edit or delete an answer and/or time."""
+    """**Bot Admin only** - edit or delete an answer and/or time."""
     
     # Check if the user invoking the command is an admin
     with bot.session as session:
