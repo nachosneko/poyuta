@@ -2113,7 +2113,7 @@ async def edit_quiz(
             quiz_date = datetime.strptime(quiz_date, "%Y-%m-%d").date()
         except ValueError:
             await interaction.response.send_message(
-                "invalid date format. Please use YYYY-MM-DD."
+                "invalid date format. please use YYYY-MM-DD."
             )
             return
 
@@ -2134,38 +2134,37 @@ async def edit_quiz(
             # Conditionally delete rows from UserStartQuizTimestamp based on gender
             gender_condition = (
                 UserStartQuizTimestamp.timestamp
-                if quiz_type.value == 1  # Assuming 1 represents male and 2 represents female
+                if quiz_type.value == 1  # 1 represents male and 2 represents female
                 else desc(UserStartQuizTimestamp.timestamp)
             )
 
-            latest_timestamp = (
+            latest_timestamps = (
                 session.query(UserStartQuizTimestamp)
                 .filter_by(quiz_id=quiz.id)
                 .order_by(gender_condition)
-                .limit(1)
-                .first()
+                .all()
             )
 
-            if latest_timestamp:
-                session.delete(latest_timestamp)
+            if latest_timestamps:
+                session.query(UserStartQuizTimestamp).filter(UserStartQuizTimestamp.quiz_id == quiz.id).delete()
 
                 # Commit the deletion to the database
                 session.commit()
 
                 await interaction.response.send_message(
                     f"{quiz_type.name} quiz updated for {quiz_date}. "
-                    f"button clicks also cleared."
+                    f"buttons for {quiz_type.name} also resetted."
                 )
             else:
                 await interaction.response.send_message(
                     "nothing to clear."
                 )
         if clear_attempts:
-            # Conditionally delete rows from Answer based on gender
+            # Conditionally delete rows from Answer based on quiz type
             # Separate conditions for male and female quiz types
             gender_condition_answer = (
                 Answer.quiz_id
-                if quiz.type.id == 1  # Assuming 1 represents Male Seiyuu and 2 represents Female Seiyuu
+                if quiz.type.id == 1  # 1 represents Male Seiyuu and 2 represents Female Seiyuu
                 else desc(Answer.quiz_id)
             )
 
@@ -2178,7 +2177,7 @@ async def edit_quiz(
             )
 
             if latest_answer:
-                # Filter and delete rows based on gender condition
+                # Filter and delete rows based on quiz type condition
                 session.query(Answer).filter(
                     Answer.quiz_id == quiz.id,
                     Answer.quiz.has(Quiz.id_type == quiz.type.id),
@@ -2191,12 +2190,12 @@ async def edit_quiz(
 
                 await interaction.response.send_message(
                     f"{quiz.type.type} quiz updated for {quiz.date}. "
-                    f"all attempts cleared."
+                    f"{quiz.type.type} attempts for today cleared."
                 )
             else:
                 await interaction.response.send_message(
                     f"{quiz.type.type} quiz updated for {quiz.date}. "
-                    f"no attempts to clear."
+                    f"no {quiz.type.type} attempts made today."
                 )
 
         else:
