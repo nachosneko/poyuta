@@ -2101,6 +2101,40 @@ async def send_submission(
     answer: str,
     bonus_answer: Optional[str] = None,
 ):
+    # Get the server and channel IDs for the current interaction
+    server_id = interaction.guild.id
+    channel_id = interaction.channel.id
+
+    with bot.session as session:
+        # Check if the current channel is allowed for submissions
+        submission_channel = (
+            session.query(SubmissionChannels)
+            .filter_by(id_sub_server=server_id, id_sub_channel=channel_id)
+            .first()
+        )
+
+        if not submission_channel:
+            # If the channel is not allowed, send a message with the correct channel information
+            the_correct_channel_to_post_in = (
+                session.query(SubmissionChannels.id_sub_channel)
+                .filter_by(id_sub_server=server_id)
+                .first()
+            )
+
+            if the_correct_channel_to_post_in:
+                channel_mention = f"<#{the_correct_channel_to_post_in[0]}>"
+                await interaction.response.send_message(
+                    f"Unauthorized Channel. Please head over to {channel_mention}",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.response.send_message(
+                    "Unauthorized Channel. Please contact the server administrator.",
+                    ephemeral=True,
+                )
+
+            return
+
 
     with bot.session as session:
         latest_quiz = (
@@ -2265,13 +2299,13 @@ async def queue(interaction: discord.Interaction):
                 if quiz:
                     creator_id = quiz.creator_id
                     value = (
-                        f"**{quiz_type.emoji} {quiz_type.type}** by <@{creator_id}>"
+                        f"Queued by <@{creator_id}>"
                     )
                 else:
                     value = "Nothing planned :disappointed_relieved:"
 
                 embed.add_field(
-                    name=f"",
+                    name=f"> {quiz_type.emoji} {quiz_type.type}",
                     value=f"> {value}",
                     inline=True,
                 )
@@ -2297,6 +2331,7 @@ async def queue(interaction: discord.Interaction):
     new_bonus_answer="the bonus character answer for the quiz.",
     clear_button_clicks="clears everyone's button clicks for the selected quiz type. only use if the clip link is broken for everyone.",
     clear_attempts="clears everyone's attempts for the selected quiz type. only use if you want to change the seiyuu clip and answer altogether.",
+    delete_quiz="delete the quiz for targetted date.",
 )
 async def edit_quiz(
     interaction: discord.Interaction,
@@ -2312,26 +2347,31 @@ async def edit_quiz(
     """**Bot Admin Only** - Update a planned quiz."""
 
     with bot.session as session:
-        if not is_bot_admin(session=session, user=interaction.user):
-            await interaction.response.send_message(
-                "you are not an admin, you can't use this command."
-            )
-            return
+        # Check if the user is an admin
+        is_admin = is_bot_admin(session=session, user=interaction.user)
 
-        try:
-            quiz_date = datetime.strptime(quiz_date, "%Y-%m-%d").date()
-        except ValueError:
-            await interaction.response.send_message(
-                "invalid date format. please use YYYY-MM-DD."
-            )
-            return
-
-        # Check if that quiz exists for this quiz_type and quiz_date
+        # Check if the quiz exists for this quiz_type and quiz_date
         quiz = (
             session.query(Quiz)
             .filter(Quiz.id_type == quiz_type.value, Quiz.date == quiz_date)
             .first()
         )
+
+        if not quiz:
+            try:
+                quiz_date = datetime.strptime(quiz_date, "%Y-%m-%d").date()
+            except ValueError:
+                await interaction.response.send_message(
+                "invalid date format. please use YYYY-MM-DD."
+            )
+            return
+
+        # Check if the user is the creator of the quiz or an admin
+        if not is_admin and quiz.creator_id != interaction.user.id:
+            await interaction.response.send_message(
+                "You are not authorized to edit or delete this quiz."
+            )
+            return
 
         if delete_quiz:
             if quiz:
