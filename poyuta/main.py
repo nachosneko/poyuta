@@ -5,7 +5,7 @@ import numpy as np
 from datetime import datetime, date, timedelta, time
 from typing import Optional
 from typing import List
-
+from collections import defaultdict
 
 # Discord
 import discord
@@ -1187,6 +1187,60 @@ async def topspeed(ctx: commands.Context):
     await session.run()
 
 
+
+
+@bot.command(name="currenttop", aliases=["ct"])
+async def current_top(ctx: commands.Context):
+    """
+    Displays today's Top Guesses.
+
+    Examples
+    ---------
+    !currenttop
+    !ct
+    """
+    with bot.session as session:
+        # Get the fastest answers for today's quiz and onwards
+        current_quiz_date = get_current_quiz_date(DAILY_QUIZ_RESET_TIME)
+        tomorrow_reset_date = current_quiz_date + timedelta(days=1)
+
+        # Explicitly define the join conditions
+        fastest_answers = (
+            session.query(Answer, QuizType)
+            .join(Quiz, Answer.quiz_id == Quiz.id)
+            .join(QuizType, Quiz.id_type == QuizType.id)
+            .filter(
+                Answer.is_correct,
+                Quiz.date >= current_quiz_date,
+                Quiz.date < tomorrow_reset_date,
+                Answer.answer != "\\Bonus Answer\\",
+            )
+            .order_by(Answer.answer_time)
+            .all()
+        )
+
+        if not fastest_answers:
+            await ctx.send(f"No valid answers found.")
+            return
+
+        embed = discord.Embed(title="Today's Top Guesses")
+
+        quiz_types = defaultdict(list)
+        medals = [":first_place:", ":second_place:", ":third_place:"]
+        for answer, quiz_type in fastest_answers:
+            quiz_types[quiz_type.type].append((answer.user.id, answer.answer_time, quiz_type.emoji))
+
+        for quiz_type, user_times in quiz_types.items():
+            user_times = sorted(user_times, key=lambda x: x[1])
+            
+            value = ""
+            for i, (user_id, time, emoji) in enumerate(user_times[:10]):
+                rank = f"{medals[i]} " if i < 3 else f"#{i + 1}: "
+                value += f"> {rank} <@{user_id}> - **{time:.2f}s** \n"
+
+            embed.add_field(name=f"> {emoji} {quiz_type}", value=value, inline=True)
+
+    await ctx.send(embed=embed)
 
 @bot.command(name="leaderboard", aliases=["lb"])
 # Add other decorators as needed
