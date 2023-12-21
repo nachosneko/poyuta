@@ -25,6 +25,7 @@ from poyuta.database import (
     QuizType,
     UserStartQuizTimestamp,
     QuizChannels,
+    SubmissionChannels,
     Answer,
     SessionFactory,
     initialize_database,
@@ -77,6 +78,7 @@ class PoyutaBot(commands.Bot):
 bot = PoyutaBot(command_prefix=config["COMMAND_PREFIX"], intents=intents)
 
 
+
 @bot.event
 async def on_ready():
     print(f"logged in as {bot.user.name}")
@@ -103,6 +105,18 @@ async def on_ready():
     except Exception as e:
         print(e)
 
+@bot.event
+async def on_message(message):
+    with bot.session as session:
+        submission_channels = session.query(SubmissionChannels).all()
+
+    # Check if the message is in any submission channel
+    if message.channel.id in [channel.id_sub_channel for channel in submission_channels]:
+        # Delete the message if it's in a submission channel
+        await message.delete()
+    else:
+        # Process other commands if the message is not in a submission channel
+        await bot.process_commands(message)
 
 # attempt to decorate up the help command
 bot.remove_command("help")
@@ -162,11 +176,6 @@ async def help(ctx, command: str = None):
         inline=False,
     )
     embed.add_field(
-        name="",
-        value="```/history```",
-        inline=False,
-    )
-    embed.add_field(
         name="", value=f"```{config['COMMAND_PREFIX']}mystats```", inline=False
     )
     embed.add_field(
@@ -188,7 +197,21 @@ async def help(ctx, command: str = None):
         value=f"```{config['COMMAND_PREFIX']}legacyleaderboard```",
         inline=False,
     )
-
+    embed.add_field(
+        name="",
+        value="```/history```",
+        inline=False,
+    )
+    embed.add_field(
+        name="",
+        value="```/submission```",
+        inline=False,
+    )
+    embed.add_field(
+        name="",
+        value="```/queue```",
+        inline=False,
+    )
     with bot.session as session:
         # If the user is an admin, show admin commands
         if is_server_admin(session, ctx.author):
@@ -231,7 +254,12 @@ async def help(ctx, command: str = None):
             )
             embed.add_field(
                 name="",
-                value="```/updatequiz ```",
+                value="```/editquiz ```",
+                inline=False,
+            )
+            embed.add_field(
+                name="",
+                value="```/editanswer ```",
                 inline=False,
             )
             embed.add_field(
@@ -1869,6 +1897,60 @@ class NewQuizView(discord.ui.View):
 
 
 @commands.check(lambda ctx: is_server_admin(ctx, session=bot.session))
+@bot.command(name="setsubmissionchannel", aliases=["ssc"])
+async def setsubmissionchannel(ctx):
+    """*Server Admin only* - Set the current channel as the submission main channel for this server."""
+
+    with bot.session as session:
+        # check if the channel is already set on this server
+        submission_channel = session.query(SubmissionChannels).get(ctx.guild.id)
+
+        if submission_channel and submission_channel.id_sub_channel == ctx.channel.id:
+            await ctx.send(
+                "This channel is already set as the submission channel for this server."
+            )
+            return
+
+        if submission_channel:
+            await ctx.send(
+                f"This server already has {bot.get_channel(submission_channel.id_sub_channel).mention} as its channel. Use {config['COMMAND_PREFIX']}unsetchannel to unset it and try again."
+            )
+            return
+
+        # add the channel to the database
+        new_submission_channel = SubmissionChannels(
+            id_sub_server=ctx.guild.id, id_sub_channel=ctx.channel.id
+        )
+        session.add(new_submission_channel)
+        session.commit()
+
+    await ctx.send(f"Submission channel set to {ctx.channel.mention}.")
+
+
+@commands.check(lambda ctx: is_server_admin(ctx, session=bot.session))
+@bot.command(name="unsetsubmissionchannel", aliases=["ussc"])
+async def unsetsubmissionchannel(ctx):
+    """*Server Admin only* - Unset the current channel as the submission channel for this server."""
+
+    with bot.session as session:
+        # check if the channel is already set on this server
+        submission_channel = session.query(SubmissionChannels).get(ctx.guild.id)
+
+        if not submission_channel:
+            await ctx.send(
+                f"This server doesn't have a channel set.\nUse {config['COMMAND_PREFIX']}setsubmissionchannel in a channel to set it as the Submission channel."
+            )
+            return
+
+        # remove the channel from the database
+        session.delete(submission_channel)
+        session.commit()
+
+    await ctx.send(
+        f"Submission channel unset from {bot.get_channel(submission_channel.id_sub_channel).mention}."
+    )
+
+@commands.check(lambda ctx: is_server_admin(ctx, session=bot.session))
 @bot.command(name="setchannel", aliases=["sc"])
 async def setchannel(ctx):
     """*Server Admin only* - Set the current channel as the quiz main channel for this server."""
@@ -2004,6 +2086,61 @@ async def new_quiz(
         f"New {quiz_type.name} quiz created on {new_date}."
     )
 
+@bot.tree.command(name="submission")
+@app_commands.choices(quiz_type=get_quiz_type_choices(session=bot.session))
+@app_commands.describe(
+    quiz_type="type of the quiz to submit",
+    clip="mp3 clip",
+    answer="correct mp3 answer ",
+    bonus_answer="The bonus character answer for the submission",
+)
+async def send_submission(
+    interaction: discord.Interaction,
+    quiz_type: app_commands.Choice[int],
+    clip: str,
+    answer: str,
+    bonus_answer: Optional[str] = None,
+):
+
+    with bot.session as session:
+        latest_quiz = (
+            session.query(Quiz)
+            .filter(Quiz.id_type == quiz_type.value)
+            .order_by(Quiz.date.desc())
+            .first()
+        )
+
+        # get current date
+        current_quiz_date = get_current_quiz_date(
+            daily_quiz_reset_time=DAILY_QUIZ_RESET_TIME
+        )
+
+        # call this just to update pfp
+        get_user(session=session, user=interaction.user, add_if_not_exist=True)
+
+        # if the latest quiz date is in the future
+        # that means there's already a quiz for today, so add the new date to the planned quizzes
+        # i.e latest quiz date + 1 day
+        if latest_quiz and latest_quiz.date >= current_quiz_date:
+            new_date = latest_quiz.date + timedelta(days=1)
+        # else there aren't any quiz today, so the new date is today
+        else:
+            new_date = current_quiz_date
+
+        # add the new quizzes to database
+        new_quiz = Quiz(
+            creator_id=interaction.user.id,
+            clip=clip,
+            answer=answer,
+            bonus_answer=bonus_answer,
+            id_type=quiz_type.value,
+            date=new_date,
+        )
+        session.add(new_quiz)
+        session.commit()
+    await interaction.response.send_message("✅")
+    # Send the result as a direct message to the user
+    await interaction.user.send(f"Submission for {quiz_type.name} added for {new_date}\n ||[{answer}]({clip})|| {'+ ||' + bonus_answer if bonus_answer else ''}||")
 
 @bot.tree.command(name="plannedquizzes")
 async def planned_quizzes(interaction: discord.Interaction):
@@ -2052,15 +2189,18 @@ async def planned_quizzes(interaction: discord.Interaction):
                 # get quiz for this type and date
                 quiz = (
                     session.query(Quiz)
-                    .filter(Quiz.id_type == quiz_type.id, Quiz.date == quiz_date)
+                    .filter(Quiz.id_type == quiz_type.id, Quiz.date == quiz_date, Quiz.creator_id)
                     .first()
                 )
 
-                value = (
-                    f"||[{quiz.answer}]({quiz.clip})||{' + ||' + quiz.bonus_answer if quiz.bonus_answer else ''}||"
-                    if quiz
-                    else "Nothing planned :disappointed_relieved:"
-                )
+                if quiz:
+                    creator_id = quiz.creator_id
+                    value = (
+                        f"||[{quiz.answer}]({quiz.clip})||{' + ||' + quiz.bonus_answer if quiz.bonus_answer else ''}|| by <@{creator_id}>"
+                    )
+                else:
+                    value = "Nothing planned :disappointed_relieved:"
+
                 embed.add_field(
                     name=f"> {quiz_type.emoji} {quiz_type.type}",
                     value=f"> {value}",
@@ -2077,6 +2217,74 @@ async def planned_quizzes(interaction: discord.Interaction):
 
         await interaction.response.send_message(embed=embed)
 
+@bot.tree.command(name="queue")
+async def queue(interaction: discord.Interaction):
+    """Check the planned quizzes."""
+
+    with bot.session as session:
+        current_quiz_date = get_current_quiz_date(
+            daily_quiz_reset_time=DAILY_QUIZ_RESET_TIME
+        )
+
+        # get all the quizzes that are planned after the current quiz
+        unique_date = (
+            session.query(Quiz.date)
+            .filter(Quiz.date >= current_quiz_date)
+            .distinct()
+            .all()
+        )
+
+        if not unique_date:
+            await interaction.response.send_message(
+                f"No planned quizzes after {current_quiz_date}."
+            )
+            return
+
+        embed = discord.Embed(title="Planned Quizzes")
+
+        # get all the quiz types
+        quiz_types = session.query(QuizType).all()
+
+        for i, quiz_date in enumerate(unique_date):
+            quiz_date = quiz_date[0]
+
+            embed.add_field(
+                name=f":calendar_spiral: __**{quiz_date if i != 0 else 'Today'}**__",
+                value="",
+                inline=False,
+            )
+
+            for i, quiz_type in enumerate(quiz_types):
+                # get quiz for this type and date
+                quiz = (
+                    session.query(Quiz)
+                    .filter(Quiz.id_type == quiz_type.id, Quiz.date == quiz_date)
+                    .first()
+                )
+
+                if quiz:
+                    creator_id = quiz.creator_id
+                    value = (
+                        f"**{quiz_type.emoji} {quiz_type.type}** by <@{creator_id}>"
+                    )
+                else:
+                    value = "Nothing planned :disappointed_relieved:"
+
+                embed.add_field(
+                    name=f"",
+                    value=f"> {value}",
+                    inline=True,
+                )
+
+                # Linebreak every two types unless last type
+                if i % 2 == 0 and i != 0 and i != len(quiz_types) - 1:
+                    embed.add_field(name="", value="", inline=False)
+
+            # Linebreak unless last date
+            if quiz_date != unique_date[-1][0]:
+                embed.add_field(name="\u200b", value="", inline=False)
+
+        await interaction.response.send_message(embed=embed)
 
 
 @bot.tree.command(name="editquiz")
@@ -2099,6 +2307,7 @@ async def edit_quiz(
     new_bonus_answer: Optional[str] = None,
     clear_button_clicks: Optional[bool] = False,
     clear_attempts: Optional[bool] = False,
+    delete_quiz: Optional[bool] = False,
 ):
     """**Bot Admin Only** - Update a planned quiz."""
 
@@ -2124,10 +2333,21 @@ async def edit_quiz(
             .first()
         )
 
-        if not quiz:
-            await interaction.response.send_message(
-                f"no {quiz_type.name} quiz on {quiz_date}. can't update it."
-            )
+        if delete_quiz:
+            if quiz:
+                # Delete the quiz
+                session.delete(quiz)
+
+                # Commit the deletion to the database
+                session.commit()
+
+                await interaction.response.send_message(
+                    f"{quiz_type.name} quiz for {quiz_date} deleted."
+                )
+            else:
+                await interaction.response.send_message(
+                    f"no {quiz_type.name} quiz on {quiz_date}."
+                )
             return
 
         if clear_button_clicks:
