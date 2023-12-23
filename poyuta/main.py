@@ -185,6 +185,9 @@ async def help(ctx, command: str = None):
         name="", value=f"```{config['COMMAND_PREFIX']}topspeed```", inline=False
     )
     embed.add_field(
+        name="", value=f"```{config['COMMAND_PREFIX']}currenttop```", inline=False
+    )
+    embed.add_field(
         name="", value=f"```{config['COMMAND_PREFIX']}leaderboard```", inline=False
     )
     embed.add_field(
@@ -214,23 +217,6 @@ async def help(ctx, command: str = None):
     )
     with bot.session as session:
         # If the user is an admin, show admin commands
-        if is_server_admin(session, ctx.author):
-            # Extra spaces
-            embed.add_field(name="", value="", inline=False)
-
-            # Server Admin Commands
-            embed.add_field(
-                name=f"> **Server Admin Commands:**",
-                value=f"```{config['COMMAND_PREFIX']}setchannel```",
-                inline=False,
-            )
-
-            embed.add_field(
-                name="",
-                value=f"```{config['COMMAND_PREFIX']}unsetchannel```",
-                inline=False,
-            )
-
         if is_bot_admin(session, ctx.author):
             # Extra spaces
             embed.add_field(name="", value="", inline=False)
@@ -1129,7 +1115,7 @@ async def generate_guesses_embed_content(
 
             for i, answer in enumerate(fastest_answers[page_start:page_end], start=page_start):
                     rank = f"{medals[i % 3]} " if i < 3 else f"#{i + 1} "
-                    value = f"{rank} | **{answer.answer_time}s** - {answer.answer} in {nb_attempts[i] if i < len(nb_attempts) else 'Unknown Attempts'} attempt(s) on {answer.quiz.date}"
+                    value = f"{rank} | **{answer.answer_time}s** - **{answer.answer}** in {nb_attempts[i]} attempt(s) / {answer.quiz.date}"
                     embed.add_field(
                         name=f"", value=value, inline=False
                     )
