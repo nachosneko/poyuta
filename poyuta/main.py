@@ -67,6 +67,9 @@ class PoyutaBot(commands.Bot):
     def __init__(self, command_prefix, intents):
         super().__init__(command_prefix=command_prefix, intents=intents)
 
+        self.last_leaderboard_update = None
+        self.last_leaderboard_message = None
+
     # add database session to bot
     # can now be access through bot.session
     @property
@@ -76,7 +79,6 @@ class PoyutaBot(commands.Bot):
 
 # Instantiate bot
 bot = PoyutaBot(command_prefix=config["COMMAND_PREFIX"], intents=intents)
-
 
 
 @bot.event
@@ -105,18 +107,22 @@ async def on_ready():
     except Exception as e:
         print(e)
 
+
 @bot.event
 async def on_message(message):
     with bot.session as session:
         submission_channels = session.query(SubmissionChannels).all()
 
     # Check if the message is in any submission channel
-    if message.channel.id in [channel.id_sub_channel for channel in submission_channels]:
+    if message.channel.id in [
+        channel.id_sub_channel for channel in submission_channels
+    ]:
         # Delete the message if it's in a submission channel
         await message.delete()
     else:
         # Process other commands if the message is not in a submission channel
         await bot.process_commands(message)
+
 
 # attempt to decorate up the help command
 bot.remove_command("help")
@@ -955,6 +961,7 @@ async def generate_stats_embed_content(
 
     return embed
 
+
 @bot.command(name="myguesses", aliases=["mg", "guesses", "g"])
 # Add other decorators as needed
 async def my_guesses(ctx: Context, user_id: Optional[int] = None):
@@ -1113,13 +1120,14 @@ async def generate_guesses_embed_content(
 
             page_end = np.min([page_start + 10, len(fastest_answers)])
 
-            for i, answer in enumerate(fastest_answers[page_start:page_end], start=page_start):
-                    rank = f"{medals[i % 3]} " if i < 3 else f"#{i + 1} "
-                    value = f"{rank} | **{answer.answer_time}s** - **{answer.answer}** in {nb_attempts[i]} attempt(s) / {answer.quiz.date}"
-                    embed.add_field(
-                        name=f"", value=value, inline=False
-                    )
+            for i, answer in enumerate(
+                fastest_answers[page_start:page_end], start=page_start
+            ):
+                rank = f"{medals[i % 3]} " if i < 3 else f"#{i + 1} "
+                value = f"{rank} | **{answer.answer_time}s** - **{answer.answer}** in {nb_attempts[i]} attempt(s) / {answer.quiz.date}"
+                embed.add_field(name=f"", value=value, inline=False)
             mgpages.append(embed)
+
 
 @bot.command(name="topspeed", aliases=["tops"])
 # Add other decorators as needed
@@ -1161,18 +1169,16 @@ async def topspeed(ctx: commands.Context):
 
         page_end = min(page_start + 20, len(fastest_answers))
 
-        for i, answer in enumerate(fastest_answers[page_start:page_end], start=page_start):
+        for i, answer in enumerate(
+            fastest_answers[page_start:page_end], start=page_start
+        ):
             rank = f"{medals[i % 3]} " if i < 3 else f"#{i + 1} "
             value = f"{rank} | **{answer.answer_time}s** - {answer.answer} by <@{answer.user_id}>"
-            embed.add_field(
-                name=f"", value=value, inline=False
-            )
+            embed.add_field(name=f"", value=value, inline=False)
         toppages.append(embed)
-    
+
     session = EmbedPaginatorSession(ctx, *toppages)
     await session.run()
-
-
 
 
 @bot.command(name="currenttop", aliases=["ct"])
@@ -1214,11 +1220,13 @@ async def current_top(ctx: commands.Context):
         quiz_types = defaultdict(list)
         medals = [":first_place:", ":second_place:", ":third_place:"]
         for answer, quiz_type in fastest_answers:
-            quiz_types[quiz_type.type].append((answer.user.id, answer.answer_time, quiz_type.emoji))
+            quiz_types[quiz_type.type].append(
+                (answer.user.id, answer.answer_time, quiz_type.emoji)
+            )
 
         for quiz_type, user_times in quiz_types.items():
             user_times = sorted(user_times, key=lambda x: x[1])
-            
+
             value = ""
             for i, (user_id, time, emoji) in enumerate(user_times[:10]):
                 rank = f"{medals[i]} " if i < 3 else f"#{i + 1}: "
@@ -1228,87 +1236,10 @@ async def current_top(ctx: commands.Context):
 
     await ctx.send(embed=embed)
 
-@bot.command(name="leaderboard", aliases=["lb"])
-# Add other decorators as needed
-async def leaderboard(ctx: commands.Context):
-    """
-    Display the leaderboards.
-
-    Score is computed as follows:
-    - 1 point for each correct answer
-    - 0.5 point for each bonus character point
-    - if there has been more than 5 attempts before getting a correct answer: 0.5 points
-    - if there has been more than 8 attempts before getting a correct answer: 0.25 points
-    - if there has been more than 3 attempts before getting a correct bonus character: 0.25 points
-
-    Examples
-    ---------
-    !leaderboard
-    !lb
-    """
-
-    with bot.session as session:
-        users = session.query(User).all()
-        quiz_types = session.query(QuizType).all()
-        medals = [":first_place:", ":second_place:", ":third_place:"]
-
-        # initialize the score dict
-        user_scores = {"total": {user.id: 0 for user in users}}
-        for quiz_type in quiz_types:
-            user_scores[quiz_type.type] = {user.id: 0 for user in users}
-
-        for user in users:
-            for quiz_type in quiz_types:
-                user_score = await compute_user_score(
-                    id_user=user.id, id_quiz_type=quiz_type.id
-                )
-                user_scores[quiz_type.type][user.id] += user_score
-                user_scores["total"][user.id] += user_score
-
-        for quiz_type in quiz_types:
-            user_scores[quiz_type.type] = await sort_user_scores_by_value(
-                user_scores[quiz_type.type]
-            )
-
-        # sort global by value
-        user_scores["total"] = await sort_user_scores_by_value(user_scores["total"])
-
-    pages = []
-    for page_start in range(0, len(users), 10):
-        embed = discord.Embed(title="Leaderboard")
-
-        page_end = np.min([page_start + 10, len(users)])
-
-        for quiz_type in quiz_types:
-            value = ""
-            for i, id_user in enumerate(
-                list(user_scores[quiz_type.type].keys())[page_start:page_end]
-            ):
-                index = page_start + i
-                rank = f"{medals[index]} " if index < 3 else f"#{index + 1}: "
-                value += f"> {rank} <@{id_user}> - {user_scores[quiz_type.type][id_user]} points\n"
-            embed.add_field(
-                name=f"> {quiz_type.emoji} {quiz_type.type}", value=value, inline=True
-            )
-
-        value = ""
-        for i, id_user in enumerate(
-            list(user_scores["total"].keys())[page_start:page_end]
-        ):
-            index = page_start + i
-            rank = f"{medals[index]} " if index < 3 else f"#{index + 1}: "
-            value += f"> {rank} <@{id_user}> - {user_scores['total'][id_user]} points\n"
-        embed.add_field(name="> Global Leaderboard", value=value, inline=False)
-
-        pages.append(embed)
-
-    session = EmbedPaginatorSession(ctx, *pages)
-    await session.run()
-
 
 @bot.command(name="seiyuuleaderboard", aliases=["slb"])
 # Add other decorators as needed
-async def leaderboard(ctx: commands.Context):
+async def seiyuuleaderboard(ctx: commands.Context):
     """
     Basically the same leardboard as the main one, except it doesn't take into account the bonus character points.
 
@@ -1317,6 +1248,15 @@ async def leaderboard(ctx: commands.Context):
     !seiyuuleaderboard
     !slb
     """
+
+    if bot.last_leaderboard_update is not None and (
+        datetime.now() - bot.last_leaderboard_update < timedelta(minutes=120)
+    ):
+        # write a message to let the user know that the leaderboard was already shown recently
+        await ctx.send(
+            f"SeiyuuLeaderboard was already shown recently. Please wait a bit before using this command again. You can search for the last leaderboard message in the channel with keywords '{config['COMMAND_PREFIX']}slb' or '{config['COMMAND_PREFIX']}seiyuuleaderboard'"
+        )
+        return
 
     with bot.session as session:
         users = session.query(User).all()
@@ -1373,6 +1313,8 @@ async def leaderboard(ctx: commands.Context):
 
         pages.append(embed)
 
+    bot.last_leaderboard_update = datetime.now()
+
     session = EmbedPaginatorSession(ctx, *pages)
     await session.run()
 
@@ -1387,9 +1329,97 @@ async def sort_user_scores_by_value(user_scores: dict):
     )
 
 
-async def compute_user_score(
-    id_user: int, id_quiz_type: int, bonus_points: bool = True
-):
+@bot.command(name="leaderboard", aliases=["lb"])
+# Add other decorators as needed
+async def leaderboard(ctx: commands.Context):
+    """
+    Display the leaderboards.
+
+    Score is computed as follows:
+    - 1 point for each correct answer
+    - 0.5 point for each bonus character point
+    - if there has been more than 5 attempts before getting a correct answer: 0.5 points
+    - if there has been more than 8 attempts before getting a correct answer: 0.25 points
+    - if there has been more than 3 attempts before getting a correct bonus character: 0.25 points
+
+    Examples
+    ---------
+    !leaderboard
+    !lb
+    """
+
+    if bot.last_leaderboard_update is not None and (
+        datetime.now() - bot.last_leaderboard_update < timedelta(minutes=120)
+    ):
+        # write a message to let the user know that the leaderboard was already shown recently
+        await ctx.send(
+            f"Leaderboard was already shown recently. Please wait a bit before using this command again. You can search for the last leaderboard message in the channel with keywords '{config['COMMAND_PREFIX']}lb' or '{config['COMMAND_PREFIX']}leaderboard'"
+        )
+        return
+
+    with bot.session as session:
+        users = session.query(User).all()
+        quiz_types = session.query(QuizType).all()
+        medals = [":first_place:", ":second_place:", ":third_place:"]
+
+        # initialize the score dict
+        user_scores = {"total": {user.id: 0 for user in users}}
+        for quiz_type in quiz_types:
+            user_scores[quiz_type.type] = {user.id: 0 for user in users}
+
+        for i, user in enumerate(users):
+
+            for quiz_type in quiz_types:
+                user_score = await compute_user_score(
+                    id_user=user.id, id_quiz_type=quiz_type.id
+                )
+                user_scores[quiz_type.type][user.id] += user_score
+                user_scores["total"][user.id] += user_score
+
+        for quiz_type in quiz_types:
+            user_scores[quiz_type.type] = await sort_user_scores_by_value(
+                user_scores[quiz_type.type]
+            )
+
+        # sort global by value
+        user_scores["total"] = await sort_user_scores_by_value(user_scores["total"])
+
+    pages = []
+    for page_start in range(0, len(users), 10):
+        embed = discord.Embed(title="Leaderboard")
+
+        page_end = np.min([page_start + 10, len(users)])
+
+        for quiz_type in quiz_types:
+            value = ""
+            for i, id_user in enumerate(
+                list(user_scores[quiz_type.type].keys())[page_start:page_end]
+            ):
+                index = page_start + i
+                rank = f"{medals[index]} " if index < 3 else f"#{index + 1}: "
+                value += f"> {rank} <@{id_user}> - {user_scores[quiz_type.type][id_user]} points\n"
+            embed.add_field(
+                name=f"> {quiz_type.emoji} {quiz_type.type}", value=value, inline=True
+            )
+
+        value = ""
+        for i, id_user in enumerate(
+            list(user_scores["total"].keys())[page_start:page_end]
+        ):
+            index = page_start + i
+            rank = f"{medals[index]} " if index < 3 else f"#{index + 1}: "
+            value += f"> {rank} <@{id_user}> - {user_scores['total'][id_user]} points\n"
+        embed.add_field(name="> Global Leaderboard", value=value, inline=False)
+
+        pages.append(embed)
+
+    bot.last_leaderboard_update = datetime.now()
+
+    session = EmbedPaginatorSession(ctx, *pages)
+    await session.run()
+
+
+async def compute_user_score(id_user: int, id_quiz_type: int, bonus_points=True):
     """
     Compute the score of a user for a given quiz type.
 
@@ -1416,62 +1446,38 @@ async def compute_user_score(
 
     nb_points = 0
     with bot.session as session:
-        # Seiyuu Points
-        correct_answers = (
-            session.query(Answer)
+
+        # Combined query to get attempts for both regular and bonus points
+        attempts = (
+            session.query(
+                Answer.quiz_id,
+                func.count(Answer.id).label("nb_attempts"),
+                case((Answer.is_bonus_point, "bonus"), else_="regular").label("type"),
+            )
             .join(Quiz)
             .filter(
                 Answer.user_id == id_user,
                 Quiz.id_type == id_quiz_type,
-                Answer.is_correct,
+                Answer.is_correct | Answer.is_bonus_point,
+            )
+            .group_by(
+                Answer.quiz_id, case((Answer.is_bonus_point, "bonus"), else_="regular")
             )
             .all()
         )
 
-        for answer in correct_answers:
-            nb_attempts = (
-                session.query(Answer)
-                .filter(
-                    Answer.user_id == id_user,
-                    Answer.quiz_id == answer.quiz_id,
-                    Answer.answer != "\\Bonus Answer\\",
-                )
-                .count()
-            )
+        nb_points = 0
 
-            nb_point = 1 if nb_attempts <= 5 else 0.5 if nb_attempts <= 8 else 0.25
-            nb_points += nb_point
+        for attempt in attempts:
+            nb_attempts = attempt.nb_attempts
+            if attempt.type == "regular":
+                nb_point = 1 if nb_attempts <= 5 else 0.5 if nb_attempts <= 8 else 0.25
+                nb_points += nb_point
+            elif attempt.type == "bonus" and bonus_points:
+                nb_point = 0.5 if nb_attempts <= 3 else 0.25
+                nb_points += nb_point
 
-        if not bonus_points:
-            return round(float(nb_points), 2)
-
-        # Bonus Character Points
-        correct_bonus_answers = (
-            session.query(Answer)
-            .join(Quiz)
-            .filter(
-                Answer.user_id == id_user,
-                Quiz.id_type == id_quiz_type,
-                Answer.is_bonus_point,
-            )
-            .all()
-        )
-
-        for answer in correct_bonus_answers:
-            nb_attempts = (
-                session.query(Answer)
-                .filter(
-                    Answer.user_id == id_user,
-                    Answer.quiz_id == answer.quiz_id,
-                    Answer.answer == "\\Bonus Answer\\",
-                )
-                .count()
-            )
-
-            nb_point = 0.5 if nb_attempts <= 3 else 0.25
-            nb_points += nb_point
-
-    return round(float(nb_points), 2)
+        return round(float(nb_points), 2)
 
 
 @bot.command(name="legacyleaderboard", aliases=["llb"])
@@ -1569,9 +1575,13 @@ async def history(interaction: discord.Interaction):
                         value += f"> ❌ {answer.answer} in {answer.answer_time}s\n"
                 else:
                     if answer.is_bonus_point:
-                        value += f"> ✅ {answer.bonus_answer} in {answer.answer_time}s\n"
+                        value += (
+                            f"> ✅ {answer.bonus_answer} in {answer.answer_time}s\n"
+                        )
                     else:
-                        value += f"> ❌ {answer.bonus_answer} in {answer.answer_time}s\n"
+                        value += (
+                            f"> ❌ {answer.bonus_answer} in {answer.answer_time}s\n"
+                        )
 
             embed.add_field(
                 name="",
@@ -1606,7 +1616,7 @@ async def post_yesterdays_quiz_results():
 
             embed.set_footer(
                 text=f"Quiz ID: {yesterday_quiz.id}",
-)
+            )
 
             if yesterday_quiz:
                 answer_feedback = f"> Answer: ||{yesterday_quiz.answer}||"
@@ -1990,6 +2000,7 @@ async def unsetsubmissionchannel(ctx):
         f"Submission channel unset from {bot.get_channel(submission_channel.id_sub_channel).mention}."
     )
 
+
 @commands.check(lambda ctx: is_server_admin(ctx, session=bot.session))
 @bot.command(name="setchannel", aliases=["sc"])
 async def setchannel(ctx):
@@ -2126,6 +2137,7 @@ async def new_quiz(
         f"New {quiz_type.name} quiz created on {new_date}."
     )
 
+
 @bot.tree.command(name="submission")
 @app_commands.choices(quiz_type=get_quiz_type_choices(session=bot.session))
 @app_commands.describe(
@@ -2175,7 +2187,6 @@ async def send_submission(
 
             return
 
-
     with bot.session as session:
         latest_quiz = (
             session.query(Quiz)
@@ -2214,7 +2225,10 @@ async def send_submission(
         session.commit()
     await interaction.response.send_message("✅")
     # Send the result as a direct message to the user
-    await interaction.user.send(f"Submission for {quiz_type.name} added for {new_date}\n ||[{answer}]({clip})|| {'+ ||' + bonus_answer if bonus_answer else ''}||")
+    await interaction.user.send(
+        f"Submission for {quiz_type.name} added for {new_date}\n ||[{answer}]({clip})|| {'+ ||' + bonus_answer if bonus_answer else ''}||"
+    )
+
 
 @bot.tree.command(name="plannedquizzes")
 async def planned_quizzes(interaction: discord.Interaction):
@@ -2263,15 +2277,17 @@ async def planned_quizzes(interaction: discord.Interaction):
                 # get quiz for this type and date
                 quiz = (
                     session.query(Quiz)
-                    .filter(Quiz.id_type == quiz_type.id, Quiz.date == quiz_date, Quiz.creator_id)
+                    .filter(
+                        Quiz.id_type == quiz_type.id,
+                        Quiz.date == quiz_date,
+                        Quiz.creator_id,
+                    )
                     .first()
                 )
 
                 if quiz:
                     creator_id = quiz.creator_id
-                    value = (
-                        f"||[{quiz.answer}]({quiz.clip})||{' + ||' + quiz.bonus_answer if quiz.bonus_answer else ''}|| by <@{creator_id}>"
-                    )
+                    value = f"||[{quiz.answer}]({quiz.clip})||{' + ||' + quiz.bonus_answer if quiz.bonus_answer else ''}|| by <@{creator_id}>"
                 else:
                     value = "Nothing planned :disappointed_relieved:"
 
@@ -2290,6 +2306,7 @@ async def planned_quizzes(interaction: discord.Interaction):
                 embed.add_field(name="\u200b", value="", inline=False)
 
         await interaction.response.send_message(embed=embed)
+
 
 @bot.tree.command(name="queue")
 async def queue(interaction: discord.Interaction):
@@ -2338,9 +2355,7 @@ async def queue(interaction: discord.Interaction):
 
                 if quiz:
                     creator_id = quiz.creator_id
-                    value = (
-                        f"Queued by <@{creator_id}>"
-                    )
+                    value = f"Queued by <@{creator_id}>"
                 else:
                     value = "Nothing planned :disappointed_relieved:"
 
@@ -2402,8 +2417,8 @@ async def edit_quiz(
                 quiz_date = datetime.strptime(quiz_date, "%Y-%m-%d").date()
             except ValueError:
                 await interaction.response.send_message(
-                "invalid date format. please use YYYY-MM-DD."
-            )
+                    "invalid date format. please use YYYY-MM-DD."
+                )
             return
 
         # Check if the user is the creator of the quiz or an admin
@@ -2446,7 +2461,9 @@ async def edit_quiz(
             )
 
             if latest_timestamps:
-                session.query(UserStartQuizTimestamp).filter(UserStartQuizTimestamp.quiz_id == quiz.id).delete()
+                session.query(UserStartQuizTimestamp).filter(
+                    UserStartQuizTimestamp.quiz_id == quiz.id
+                ).delete()
 
                 # Commit the deletion to the database
                 session.commit()
@@ -2456,15 +2473,14 @@ async def edit_quiz(
                     f"buttons for {quiz_type.name} also resetted."
                 )
             else:
-                await interaction.response.send_message(
-                    "nothing to clear."
-                )
+                await interaction.response.send_message("nothing to clear.")
         if clear_attempts:
             # Conditionally delete rows from Answer based on quiz type
             # Separate conditions for male and female quiz types
             gender_condition_answer = (
                 Answer.quiz_id
-                if quiz.type.id == 1  # 1 represents Male Seiyuu and 2 represents Female Seiyuu
+                if quiz.type.id
+                == 1  # 1 represents Male Seiyuu and 2 represents Female Seiyuu
                 else desc(Answer.quiz_id)
             )
 
@@ -2482,7 +2498,6 @@ async def edit_quiz(
                     Answer.quiz_id == quiz.id,
                     Answer.quiz.has(Quiz.id_type == quiz.type.id),
                     Answer.quiz.has(Quiz.date == quiz.date),
-
                 ).delete()
 
                 # Commit the deletion to the database
@@ -2505,7 +2520,9 @@ async def edit_quiz(
                 quiz.clip = new_clip if new_clip is not None else quiz.clip
                 quiz.answer = new_answer if new_answer is not None else quiz.answer
                 quiz.bonus_answer = (
-                    new_bonus_answer if new_bonus_answer is not None else quiz.bonus_answer
+                    new_bonus_answer
+                    if new_bonus_answer is not None
+                    else quiz.bonus_answer
                 )
 
                 # Commit the changes to the database
@@ -2518,6 +2535,7 @@ async def edit_quiz(
                 await interaction.response.send_message(
                     "please provide one or more of the optional values to update."
                 )
+
 
 # Command to edit answers
 @bot.tree.command(name="editanswer")
@@ -2541,7 +2559,7 @@ async def edit_answer(
     delete: Optional[bool] = False,
 ):
     """**Bot Admin Only** - edit or delete an answer and/or time."""
-    
+
     # Check if the user invoking the command is an admin
     with bot.session as session:
         if not is_bot_admin(session=session, user=interaction.user):
@@ -2549,7 +2567,7 @@ async def edit_answer(
                 "You are not an admin, you can't use this command."
             )
             return
-    
+
     # Access the database
     with SessionFactory() as session:
         # Retrieve the answer to be edited or deleted based on user_id, answer, and answer_time
@@ -2558,7 +2576,7 @@ async def edit_answer(
             .filter_by(user_id=user_id, answer=answer, answer_time=answer_time)
             .first()
         )
-        
+
         # Get the user
         user = (
             get_user(session=session, user=interaction.author, add_if_not_exist=True)
@@ -2566,9 +2584,11 @@ async def edit_answer(
             else get_user_from_id(session=session, user_id=user_id)
         )
         if not user:
-            await interaction.send(f"{interaction.author.mention} This person doesn't have any guesses yet.")
+            await interaction.send(
+                f"{interaction.author.mention} This person doesn't have any guesses yet."
+            )
             return
-        
+
         # Check if the result is None
         if answer_obj is None:
             await interaction.response.send_message("Answer not found.")
@@ -2578,7 +2598,9 @@ async def edit_answer(
         if delete:
             session.delete(answer_obj)
             session.commit()
-            await interaction.response.send_message(f"Answer for user **{user.name}**, answer {answer}, and time {answer_time} deleted.")
+            await interaction.response.send_message(
+                f"Answer for user **{user.name}**, answer {answer}, and time {answer_time} deleted."
+            )
             return
 
         # Update the answer if new_answer is provided
@@ -2593,7 +2615,10 @@ async def edit_answer(
 
         session.commit()
 
-        await interaction.response.send_message(f"Answer for user **{user.name}**, answer {answer}, and time {answer_time} updated.")
+        await interaction.response.send_message(
+            f"Answer for user **{user.name}**, answer {answer}, and time {answer_time} updated."
+        )
+
 
 # Helper function to check if a user is an admin
 def is_bot_admin(session, user):
