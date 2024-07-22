@@ -2570,12 +2570,11 @@ async def edit_answer(
 
     # Access the database
     with SessionFactory() as session:
-        # Retrieve the answer to be edited or deleted based on user_id, answer, and answer_time
-        answer_obj = (
-            session.query(Answer)
-            .filter_by(user_id=user_id, answer=answer, answer_time=answer_time)
-            .first()
-        )
+        # Build the query
+        query = session.query(Answer).filter_by(user_id=user_id, answer=answer)
+        if answer_time is not None:
+            query = query.filter_by(answer_time=answer_time)
+        answer_obj = query.first()
 
         # Get the user
         user = (
