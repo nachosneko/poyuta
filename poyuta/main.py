@@ -2542,6 +2542,7 @@ async def edit_quiz(
 @app_commands.describe(
     user_id="which user to edit",
     answer="which answer to edit",
+    answer_time="which answer time to edit",
     new_answer="new answer",
     new_answer_time="time to edit",
     is_correct="is correct or not",
@@ -2551,6 +2552,7 @@ async def edit_answer(
     interaction: discord.Interaction,
     user_id: str,
     answer: str,
+    answer_time: Optional[str] = None,
     new_answer: Optional[str] = None,
     new_answer_time: Optional[str] = None,
     is_correct: Optional[bool] = None,
@@ -2571,7 +2573,7 @@ async def edit_answer(
         # Retrieve the answer to be edited or deleted based on user_id, answer, and answer_time
         answer_obj = (
             session.query(Answer)
-            .filter_by(user_id=user_id, answer=answer)
+            .filter_by(user_id=user_id, answer=answer, answer_time=answer_time)
             .first()
         )
 
@@ -2597,7 +2599,7 @@ async def edit_answer(
             session.delete(answer_obj)
             session.commit()
             await interaction.response.send_message(
-                f"Answer for user **{user.name}**, answer {answer}, deleted."
+                f"Answer for user **{user.name}**, answer {answer}, and time {answer_time} deleted."
             )
             return
 
@@ -2614,7 +2616,7 @@ async def edit_answer(
         session.commit()
 
         await interaction.response.send_message(
-            f"Answer for user **{user.name}**, answer {answer} updated."
+            f"Answer for user **{user.name}**, answer {answer}, and time {answer_time} updated."
         )
 
 
