@@ -188,6 +188,12 @@ async def help(ctx, command: str = None):
         name="", value=f"```{config['COMMAND_PREFIX']}myguesses```", inline=False
     )
     embed.add_field(
+        name="", value=f"```{config['COMMAND_PREFIX']}myfemaleguesses```", inline=False
+    )
+    embed.add_field(
+        name="", value=f"```{config['COMMAND_PREFIX']}mymaleguesses```", inline=False
+    )
+    embed.add_field(
         name="", value=f"```{config['COMMAND_PREFIX']}topspeed```", inline=False
     )
     embed.add_field(
@@ -962,7 +968,7 @@ async def generate_stats_embed_content(
     return embed
 
 
-@bot.command(name="myguesses", aliases=["mg", "guesses", "g"])
+@bot.command(name="myguesses", aliases=["guesses", "g"])
 # Add other decorators as needed
 async def my_guesses(ctx: Context, user_id: Optional[int] = None):
     """
@@ -971,7 +977,6 @@ async def my_guesses(ctx: Context, user_id: Optional[int] = None):
     Examples
     ---------
     !myguesses
-    !mg
     !guesses
     !g
     """
@@ -1006,6 +1011,102 @@ async def my_guesses(ctx: Context, user_id: Optional[int] = None):
                 mgpages=mgpages,
                 ctx=ctx,  # Pass ctx to the generator
             )
+
+        paginator = EmbedPaginatorSession(ctx, *mgpages)
+        await paginator.run()
+
+
+@bot.command(name="myfemaleguesses", aliases=["mfg", "femaleguesses", "fg"])
+# Add other decorators as needed
+async def my_female_guesses(ctx: Context, user_id: Optional[int] = None):
+    """
+    Get your stats.
+
+    Examples
+    ---------
+    !myfemaleguesses
+    !mfg
+    !femaleguesses
+    !fg
+    """
+
+    with bot.session as session:
+        # get the user
+        user = (
+            get_user(session=session, user=ctx.author, add_if_not_exist=True)
+            if not user_id
+            else get_user_from_id(session=session, user_id=user_id)
+        )
+
+        if not user:
+            await ctx.send(f"{ctx.author.mention} You don't have any guesses yet.")
+            return
+
+        quiz_type = session.query(QuizType).get(2) #female quiz type
+        mgpages = []
+
+        # create the embed object for each quiz type
+        embed = discord.Embed(title=f"Top Guesses for {quiz_type.type}")
+        embed.set_author(name=ctx.author.name, icon_url=ctx.author.avatar.url)
+
+        # generate the embed content for this quiz_type
+        await generate_guesses_embed_content(
+            session=session,
+            embed=embed,
+            user_id=user.id,
+            quiz_type=quiz_type,
+            daily_quiz_reset_time=DAILY_QUIZ_RESET_TIME,
+            mgpages=mgpages,
+            ctx=ctx,  # Pass ctx to the generator
+        )
+
+        paginator = EmbedPaginatorSession(ctx, *mgpages)
+        await paginator.run()
+
+
+@bot.command(name="mymaleguesses", aliases=["mmg", "maleguesses", "mg"])
+# Add other decorators as needed
+async def my_male_guesses(ctx: Context, user_id: Optional[int] = None):
+    """
+    Get your stats.
+
+    Examples
+    ---------
+    !mymaleguesses
+    !mmg
+    !maleguesses
+    !mg
+    """
+
+    with bot.session as session:
+        # get the user
+        user = (
+            get_user(session=session, user=ctx.author, add_if_not_exist=True)
+            if not user_id
+            else get_user_from_id(session=session, user_id=user_id)
+        )
+
+        if not user:
+            await ctx.send(f"{ctx.author.mention} You don't have any guesses yet.")
+            return
+
+        quiz_type = session.query(QuizType).get(1) #male quiz type
+        mgpages = []
+
+        # create the embed object for each quiz type
+        embed = discord.Embed(title=f"Top Guesses for {quiz_type.type}")
+        embed.set_author(name=ctx.author.name, icon_url=ctx.author.avatar.url)
+
+        # generate the embed content for this quiz_type
+        await generate_guesses_embed_content(
+            session=session,
+            embed=embed,
+            user_id=user.id,
+            quiz_type=quiz_type,
+            daily_quiz_reset_time=DAILY_QUIZ_RESET_TIME,
+            mgpages=mgpages,
+            ctx=ctx,  # Pass ctx to the generator
+        )
 
         paginator = EmbedPaginatorSession(ctx, *mgpages)
         await paginator.run()
