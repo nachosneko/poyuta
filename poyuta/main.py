@@ -163,22 +163,12 @@ async def help(ctx, command: str = None):
     # General Commands
     embed.add_field(
         name=f"> **General Commands:**",
-        value=f"```{config['COMMAND_PREFIX']}male ||my_answer||```",
+        value=f"```{config['COMMAND_PREFIX']}male ||my_answer||\n{config['COMMAND_PREFIX']}malecharacter ||my_answer||```",
         inline=False,
     )
     embed.add_field(
         name="",
-        value=f"```{config['COMMAND_PREFIX']}malecharacter ||my_answer||```",
-        inline=False,
-    )
-    embed.add_field(
-        name="",
-        value=f"```{config['COMMAND_PREFIX']}female ||my_answer||```",
-        inline=False,
-    )
-    embed.add_field(
-        name="",
-        value=f"```{config['COMMAND_PREFIX']}femalecharacter ||my_answer||```",
+        value=f"```{config['COMMAND_PREFIX']}female ||my_answer||\n{config['COMMAND_PREFIX']}femalecharacter ||my_answer||```",
         inline=False,
     )
     embed.add_field(
@@ -195,16 +185,9 @@ async def help(ctx, command: str = None):
         name="", value=f"```{config['COMMAND_PREFIX']}mystats```", inline=False
     )
     embed.add_field(
-        name="", value=f"```{config['COMMAND_PREFIX']}myfemaleguesses```", inline=False
-    )
-    embed.add_field(
-        name="", value=f"```{config['COMMAND_PREFIX']}mymaleguesses```", inline=False
-    )
-    embed.add_field(
-        name="", value=f"```{config['COMMAND_PREFIX']}myimageguesses```", inline=False
-    )
-    embed.add_field(
-        name="", value=f"```{config['COMMAND_PREFIX']}leaderboard```", inline=False
+        name="",
+        value=f"```{config['COMMAND_PREFIX']}myfemaleguesses\n{config['COMMAND_PREFIX']}mymaleguesses\n{config['COMMAND_PREFIX']}myimageguesses\n{config['COMMAND_PREFIX']}mysongguesses```",
+        inline=False,
     )
     embed.add_field(
         name="", value=f"```{config['COMMAND_PREFIX']}topspeed```", inline=False
@@ -213,16 +196,8 @@ async def help(ctx, command: str = None):
         name="", value=f"```{config['COMMAND_PREFIX']}currenttop```", inline=False
     )
     embed.add_field(
-        name="", value=f"```{config['COMMAND_PREFIX']}leaderboard```", inline=False
-    )
-    embed.add_field(
         name="",
-        value=f"```{config['COMMAND_PREFIX']}seiyuuleaderboard```",
-        inline=False,
-    )
-    embed.add_field(
-        name="",
-        value=f"```{config['COMMAND_PREFIX']}legacyleaderboard```",
+        value=f"```{config['COMMAND_PREFIX']}leaderboard\n{config['COMMAND_PREFIX']}seiyuuleaderboard\n{config['COMMAND_PREFIX']}legacyleaderboard```",
         inline=False,
     )
     embed.add_field(
@@ -249,13 +224,7 @@ async def help(ctx, command: str = None):
             # Bot Admin Commands (for admins only)
             embed.add_field(
                 name=f"> **Bot Admin Commands:**",
-                value=f"```{config['COMMAND_PREFIX']}postquizresults```",
-                inline=False,
-            )
-
-            embed.add_field(
-                name="",
-                value=f"```{config['COMMAND_PREFIX']}postquizbuttons```",
+                value=f"```{config['COMMAND_PREFIX']}postquizresults\n{config['COMMAND_PREFIX']}postquizbuttons```",
                 inline=False,
             )
             embed.add_field(
