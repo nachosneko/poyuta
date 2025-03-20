@@ -182,16 +182,29 @@ async def help(ctx, command: str = None):
         inline=False,
     )
     embed.add_field(
-        name="", value=f"```{config['COMMAND_PREFIX']}mystats```", inline=False
+        name="",
+        value=f"```{config['COMMAND_PREFIX']}image ||my_answer||```",
+        inline=False,
     )
     embed.add_field(
-        name="", value=f"```{config['COMMAND_PREFIX']}myguesses```", inline=False
+        name="",
+        value=f"```{config['COMMAND_PREFIX']}song ||my_answer||```",
+        inline=False,
+    )
+    embed.add_field(
+        name="", value=f"```{config['COMMAND_PREFIX']}mystats```", inline=False
     )
     embed.add_field(
         name="", value=f"```{config['COMMAND_PREFIX']}myfemaleguesses```", inline=False
     )
     embed.add_field(
         name="", value=f"```{config['COMMAND_PREFIX']}mymaleguesses```", inline=False
+    )
+    embed.add_field(
+        name="", value=f"```{config['COMMAND_PREFIX']}myimageguesses```", inline=False
+    )
+    embed.add_field(
+        name="", value=f"```{config['COMMAND_PREFIX']}leaderboard```", inline=False
     )
     embed.add_field(
         name="", value=f"```{config['COMMAND_PREFIX']}topspeed```", inline=False
@@ -276,7 +289,6 @@ async def help(ctx, command: str = None):
 
 
 @bot.command(name="male", aliases=["m"])
-# Add other decorators as needed
 async def male_answer_quiz(
     ctx: commands.Context,
     *answer: str,
@@ -307,7 +319,6 @@ async def male_answer_quiz(
 
 
 @bot.command(name="female", aliases=["f"])
-# Add other decorators as needed
 async def female_answer_quiz(ctx: commands.Context):
     """
     Answer today's female seiyuu quiz.
@@ -334,6 +345,66 @@ async def female_answer_quiz(ctx: commands.Context):
 
     await answer_quiz_type(
         ctx=ctx, quiz_type_id=2, quiz_type_name="Female", answer=answer
+    )
+
+
+@bot.command(name="image", aliases=["i"])
+async def image_answer_quiz(ctx: commands.Context):
+    """
+    Answer today's image quiz.
+    Please use ||spoiler tags|| to hide your answer.
+
+    Arguments
+    ---------
+    answer : str
+        The answer to the quiz.
+
+    Examples
+    ---------
+    !image ||your answer||
+    !i ||your answer||
+    """
+
+    answer = ctx.message.content.split(" ", 1)[1:]
+
+    # edit their message to hide the answer
+    await ctx.message.delete()
+
+    # join the answer
+    answer = " ".join(answer)
+
+    await answer_quiz_type(
+        ctx=ctx, quiz_type_id=3, quiz_type_name="Image", answer=answer
+    )
+
+
+@bot.command(name="song", aliases=["s"])
+async def song_answer_quiz(ctx: commands.Context):
+    """
+    Answer today's song quiz.
+    Please use ||spoiler tags|| to hide your answer.
+
+    Arguments
+    ---------
+    answer : str
+        The answer to the quiz.
+
+    Examples
+    ---------
+    !song ||your answer||
+    !s ||your answer||
+    """
+
+    answer = ctx.message.content.split(" ", 1)[1:]
+
+    # edit their message to hide the answer
+    await ctx.message.delete()
+
+    # join the answer
+    answer = " ".join(answer)
+
+    await answer_quiz_type(
+        ctx=ctx, quiz_type_id=4, quiz_type_name="Song", answer=answer
     )
 
 
@@ -749,7 +820,7 @@ async def answer_bonus_quiz(
             return
 
 
-@bot.command(name="mystats", aliases=["ms", "stats", "s"])
+@bot.command(name="mystats", aliases=["ms", "stats"])
 # Add other decorators as needed
 async def my_stats(ctx: commands.Context, user_id: Optional[int] = None):
     """
@@ -968,59 +1039,10 @@ async def generate_stats_embed_content(
     return embed
 
 
-@bot.command(name="myguesses", aliases=["guesses", "g"])
-# Add other decorators as needed
-async def my_guesses(ctx: Context, user_id: Optional[int] = None):
-    """
-    Get your stats.
-
-    Examples
-    ---------
-    !myguesses
-    !guesses
-    !g
-    """
-
-    with bot.session as session:
-        # get the user
-        user = (
-            get_user(session=session, user=ctx.author, add_if_not_exist=True)
-            if not user_id
-            else get_user_from_id(session=session, user_id=user_id)
-        )
-
-        if not user:
-            await ctx.send(f"{ctx.author.mention} You don't have any guesses yet.")
-            return
-
-        quiz_types = session.query(QuizType).all()
-        mgpages = []
-
-        for quiz_type in quiz_types:
-            # create the embed object for each quiz type
-            embed = discord.Embed(title=f"Top Guesses for {quiz_type.type}")
-            embed.set_author(name=ctx.author.name, icon_url=ctx.author.avatar.url)
-
-            # generate the embed content for this quiz_type
-            await generate_guesses_embed_content(
-                session=session,
-                embed=embed,
-                user_id=user.id,
-                quiz_type=quiz_type,
-                daily_quiz_reset_time=DAILY_QUIZ_RESET_TIME,
-                mgpages=mgpages,
-                ctx=ctx,  # Pass ctx to the generator
-            )
-
-        paginator = EmbedPaginatorSession(ctx, *mgpages)
-        await paginator.run()
-
-
 @bot.command(name="myfemaleguesses", aliases=["mfg", "femaleguesses", "fg"])
-# Add other decorators as needed
 async def my_female_guesses(ctx: Context, user_id: Optional[int] = None):
     """
-    Get your stats.
+    Get your female seiyuu stats.
 
     Examples
     ---------
@@ -1042,7 +1064,7 @@ async def my_female_guesses(ctx: Context, user_id: Optional[int] = None):
             await ctx.send(f"{ctx.author.mention} You don't have any guesses yet.")
             return
 
-        quiz_type = session.query(QuizType).get(2) #female quiz type
+        quiz_type = session.query(QuizType).get(2)  # female quiz type
         mgpages = []
 
         # create the embed object for each quiz type
@@ -1065,10 +1087,9 @@ async def my_female_guesses(ctx: Context, user_id: Optional[int] = None):
 
 
 @bot.command(name="mymaleguesses", aliases=["mmg", "maleguesses", "mg"])
-# Add other decorators as needed
 async def my_male_guesses(ctx: Context, user_id: Optional[int] = None):
     """
-    Get your stats.
+    Get your male seiyuu stats.
 
     Examples
     ---------
@@ -1090,7 +1111,101 @@ async def my_male_guesses(ctx: Context, user_id: Optional[int] = None):
             await ctx.send(f"{ctx.author.mention} You don't have any guesses yet.")
             return
 
-        quiz_type = session.query(QuizType).get(1) #male quiz type
+        quiz_type = session.query(QuizType).get(1)  # male quiz type
+        mgpages = []
+
+        # create the embed object for each quiz type
+        embed = discord.Embed(title=f"Top Guesses for {quiz_type.type}")
+        embed.set_author(name=ctx.author.name, icon_url=ctx.author.avatar.url)
+
+        # generate the embed content for this quiz_type
+        await generate_guesses_embed_content(
+            session=session,
+            embed=embed,
+            user_id=user.id,
+            quiz_type=quiz_type,
+            daily_quiz_reset_time=DAILY_QUIZ_RESET_TIME,
+            mgpages=mgpages,
+            ctx=ctx,  # Pass ctx to the generator
+        )
+
+        paginator = EmbedPaginatorSession(ctx, *mgpages)
+        await paginator.run()
+
+
+@bot.command(name="myimageguesses", aliases=["mig", "imageguesses", "mi"])
+async def my_image_guesses(ctx: Context, user_id: Optional[int] = None):
+    """
+    Get your image stats.
+
+    Examples
+    ---------
+    !myimageguesses
+    !mig
+    !imageguesses
+    !mi
+    """
+
+    with bot.session as session:
+        # get the user
+        user = (
+            get_user(session=session, user=ctx.author, add_if_not_exist=True)
+            if not user_id
+            else get_user_from_id(session=session, user_id=user_id)
+        )
+
+        if not user:
+            await ctx.send(f"{ctx.author.mention} You don't have any guesses yet.")
+            return
+
+        quiz_type = session.query(QuizType).get(3)
+        mgpages = []
+
+        # create the embed object for each quiz type
+        embed = discord.Embed(title=f"Top Guesses for {quiz_type.type}")
+        embed.set_author(name=ctx.author.name, icon_url=ctx.author.avatar.url)
+
+        # generate the embed content for this quiz_type
+        await generate_guesses_embed_content(
+            session=session,
+            embed=embed,
+            user_id=user.id,
+            quiz_type=quiz_type,
+            daily_quiz_reset_time=DAILY_QUIZ_RESET_TIME,
+            mgpages=mgpages,
+            ctx=ctx,  # Pass ctx to the generator
+        )
+
+        paginator = EmbedPaginatorSession(ctx, *mgpages)
+        await paginator.run()
+
+
+@bot.command(name="mysongguesses", aliases=["msg", "songguesses", "ms"])
+async def my_song_guesses(ctx: Context, user_id: Optional[int] = None):
+    """
+    Get your song stats.
+
+    Examples
+    ---------
+    !mysongguesses
+    !msg
+    !songguesses
+    !ms
+    """
+
+    with bot.session as session:
+        # get the user
+        user = (
+            get_user(session=session, user=ctx.author, add_if_not_exist=True)
+            if not user_id
+            else get_user_from_id(session=session, user_id=user_id)
+        )
+
+        if not user:
+            await ctx.send(f"{ctx.author.mention} You don't have any guesses yet.")
+            return
+
+        quiz_type = session.query(QuizType).get(4)
         mgpages = []
 
         # create the embed object for each quiz type
@@ -2018,11 +2133,14 @@ class NewQuizButton(discord.ui.Button):
                 ),
             )
 
-            embed.add_field(
-                name="",
-                value=current_quiz.clip,
-                inline=True,
-            )
+            if self.quiz_type.type == "Image":
+                embed.set_image(url=current_quiz.clip)
+            else:
+                embed.add_field(
+                    name="",
+                    value=current_quiz.clip,
+                    inline=True,
+                )
 
             if current_quiz.bonus_answer:
                 embed.add_field(
