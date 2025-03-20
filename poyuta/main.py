@@ -820,7 +820,7 @@ async def answer_bonus_quiz(
             return
 
 
-@bot.command(name="mystats", aliases=["ms", "stats"])
+@bot.command(name="mystats", aliases=["stats"])
 # Add other decorators as needed
 async def my_stats(ctx: commands.Context, user_id: Optional[int] = None):
     """
@@ -1606,7 +1606,7 @@ async def leaderboard(ctx: commands.Context):
 
         page_end = np.min([page_start + 10, len(users)])
 
-        for quiz_type in quiz_types:
+        for idx_q, quiz_type in enumerate(quiz_types):
             value = ""
             for i, id_user in enumerate(
                 list(user_scores[quiz_type.type].keys())[page_start:page_end]
@@ -1614,11 +1614,18 @@ async def leaderboard(ctx: commands.Context):
                 index = page_start + i
                 rank = f"{medals[index]} " if index < 3 else f"#{index + 1}: "
                 value += f"> {rank} <@{id_user}> - {user_scores[quiz_type.type][id_user]} points\n"
+
             embed.add_field(
                 name=f"> {quiz_type.emoji} {quiz_type.type}", value=value, inline=True
             )
 
+            # Linebreak every two types unless last type
+            if (idx_q + 1) % 2 == 0 and idx_q != 0 and idx_q + 1 != len(quiz_types):
+                print("Linebreak !", idx_q, len(quiz_types))
+                embed.add_field(name="\u200b", value="", inline=False)
+
         value = ""
+        embed.add_field(name="\u200b", value="", inline=False)
         for i, id_user in enumerate(
             list(user_scores["total"].keys())[page_start:page_end]
         ):
@@ -2585,7 +2592,7 @@ async def queue(interaction: discord.Interaction):
                 )
 
                 # Linebreak every two types unless last type
-                if i % 2 == 0 and i != 0 and i != len(quiz_types) - 1:
+                if (i + 1) % 2 == 0 and i != 0 and i + 1 != len(quiz_types):
                     embed.add_field(name="", value="", inline=False)
 
             # Linebreak unless last date

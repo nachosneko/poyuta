@@ -16,7 +16,7 @@ DATABASE_PATH.mkdir(exist_ok=True)
 
 DATABASE_URL = f"sqlite:///{DATABASE_PATH}/poyuta.db"
 engine = create_engine(
-    DATABASE_URL, connect_args={"check_same_thread": False}, echo=True
+    DATABASE_URL, connect_args={"check_same_thread": False}, echo=False
 )
 SessionFactory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -38,11 +38,13 @@ class QuizChannels(Base):
     id_server = sa.Column(sa.Integer, primary_key=True)
     id_channel = sa.Column(sa.Integer, nullable=False)
 
+
 class SubmissionChannels(Base):
     __tablename__ = "submission_channels"
 
     id_sub_server = sa.Column(sa.Integer, primary_key=True)
     id_sub_channel = sa.Column(sa.Integer, nullable=False)
+
 
 class User(Base):
     __tablename__ = "users"
