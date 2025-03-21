@@ -131,7 +131,7 @@ bot.remove_command("help")
 @bot.command()
 async def help(ctx, command: str = None):
     # Create an Embed
-    embed = discord.Embed(title="Command Help", color=discord.Color.blue())
+    embed = discord.Embed(title="General Command Help #1", color=discord.Color.blue())
 
     embed.add_field(
         name=f"Type `{config['COMMAND_PREFIX']}help <command>` for more details.",
@@ -160,98 +160,75 @@ async def help(ctx, command: str = None):
         await ctx.send(f"Command `{config['COMMAND_PREFIX']}{command}` not found.")
         return
 
-    # General Commands
-    embed.add_field(
-        name=f"> **General Commands:**",
-        value=f"```{config['COMMAND_PREFIX']}male ||my_answer||\n{config['COMMAND_PREFIX']}malecharacter ||my_answer||```",
-        inline=False,
-    )
-    embed.add_field(
-        name="",
-        value=f"```{config['COMMAND_PREFIX']}female ||my_answer||\n{config['COMMAND_PREFIX']}femalecharacter ||my_answer||```",
-        inline=False,
-    )
-    embed.add_field(
-        name="",
-        value=f"```{config['COMMAND_PREFIX']}image ||my_answer||```",
-        inline=False,
-    )
-    embed.add_field(
-        name="",
-        value=f"```{config['COMMAND_PREFIX']}song ||my_answer||```",
-        inline=False,
-    )
-    embed.add_field(
-        name="", value=f"```{config['COMMAND_PREFIX']}mystats```", inline=False
-    )
-    embed.add_field(
-        name="",
-        value=f"```{config['COMMAND_PREFIX']}myfemaleguesses\n{config['COMMAND_PREFIX']}mymaleguesses\n{config['COMMAND_PREFIX']}myimageguesses\n{config['COMMAND_PREFIX']}mysongguesses```",
-        inline=False,
-    )
-    embed.add_field(
-        name="", value=f"```{config['COMMAND_PREFIX']}topspeed```", inline=False
-    )
-    embed.add_field(
-        name="", value=f"```{config['COMMAND_PREFIX']}currenttop```", inline=False
-    )
-    embed.add_field(
-        name="",
-        value=f"```{config['COMMAND_PREFIX']}leaderboard\n{config['COMMAND_PREFIX']}seiyuuleaderboard\n{config['COMMAND_PREFIX']}legacyleaderboard```",
-        inline=False,
-    )
-    embed.add_field(
-        name="",
-        value="```/history```",
-        inline=False,
-    )
-    embed.add_field(
-        name="",
-        value="```/submission```",
-        inline=False,
-    )
-    embed.add_field(
-        name="",
-        value="```/queue```",
-        inline=False,
-    )
+    pages = []
+
+    # General commands list
+    general_commands = [
+        (f"{config['COMMAND_PREFIX']}male ||my_answer||"),
+        (f"{config['COMMAND_PREFIX']}malecharacter ||my_answer||"),
+        (f"{config['COMMAND_PREFIX']}female ||my_answer||"),
+        (f"{config['COMMAND_PREFIX']}femalecharacter ||my_answer||"),
+        (f"{config['COMMAND_PREFIX']}image ||my_answer||"),
+        (f"{config['COMMAND_PREFIX']}song ||my_answer||"),
+        (f"{config['COMMAND_PREFIX']}mystats"),
+        (f"{config['COMMAND_PREFIX']}myfemaleguesses"),
+        (f"{config['COMMAND_PREFIX']}mymaleguesses"),
+        (f"{config['COMMAND_PREFIX']}myimageguesses"),
+        (f"{config['COMMAND_PREFIX']}mysongguesses"),
+        (f"{config['COMMAND_PREFIX']}topspeed"),
+        (f"{config['COMMAND_PREFIX']}currenttop"),
+        (f"{config['COMMAND_PREFIX']}leaderboard"),
+        (f"{config['COMMAND_PREFIX']}seiyuuleaderboard"),
+        (f"{config['COMMAND_PREFIX']}legacyleaderboard"),
+        ("/history"),
+        ("/submission"),
+        ("/queue"),
+    ]
+
+    admin_commands = [
+        (f"{config['COMMAND_PREFIX']}postquizresults"),
+        (f"{config['COMMAND_PREFIX']}postquizbuttons"),
+        ("/newquiz"),
+        ("/editquiz"),
+        ("/editanswer"),
+        ("/plannedquizzes"),
+    ]
+
+    per_page = 10
+    for i, command in enumerate(general_commands):
+        embed.add_field(name="", value=f"```{command}```", inline=False)
+
+        # not the first or last command
+        if (i + 1) % per_page == 0 and i != 0 and i != len(general_commands) - 1:
+            pages.append(embed)
+            embed = discord.Embed(
+                title=f"General Command Help #{len(pages)+1}",
+                color=discord.Color.blue(),
+            )
+            embed.add_field(
+                name=f"Type `{config['COMMAND_PREFIX']}help <command>` for more details.",
+                value="\u200b",
+                inline=False,
+            )
+
+    pages.append(embed)
+
+    # Check admin status
     with bot.session as session:
-        # If the user is an admin, show admin commands
         if is_bot_admin(session, ctx.author):
-            # Extra spaces
-            embed.add_field(name="", value="", inline=False)
 
-            # Bot Admin Commands (for admins only)
-            embed.add_field(
-                name=f"> **Bot Admin Commands:**",
-                value=f"```{config['COMMAND_PREFIX']}postquizresults\n{config['COMMAND_PREFIX']}postquizbuttons```",
-                inline=False,
-            )
-            embed.add_field(
-                name="",
-                value="```/newquiz ```",
-                inline=False,
-            )
-            embed.add_field(
-                name="",
-                value="```/editquiz ```",
-                inline=False,
-            )
-            embed.add_field(
-                name="",
-                value="```/editanswer ```",
-                inline=False,
-            )
-            embed.add_field(
-                name="",
-                value="```/plannedquizzes```",
-                inline=False,
-            )
+            embed = discord.Embed(title="Admin Command Help", color=discord.Color.red())
 
-    # for c/p new commands: embed.add_field(name="", value="``````", inline=False)
+            # Create an embed for each admin command
+            for command in admin_commands:
+                embed.add_field(name="", value=f"```{command}```", inline=False)
+
+            pages.append(embed)
+
+    session = EmbedPaginatorSession(ctx, *pages)
 
     # Send the embed
-    await ctx.send(embed=embed)
+    await session.run()
 
 
 # --- Answering seiyuu --- #
