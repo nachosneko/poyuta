@@ -775,9 +775,7 @@ async def my_stats(ctx: commands.Context, user_id: Optional[int] = None):
     Examples
     ---------
     !mystats
-    !ms
     !stats
-    !s
     """
 
     with bot.session as session:
@@ -793,14 +791,16 @@ async def my_stats(ctx: commands.Context, user_id: Optional[int] = None):
             await ctx.send(f"{ctx.author.mention} You don't have any stats yet.")
             return
 
-        # create the embed object
-        embed = discord.Embed(title="")
-
-        # set the author
-        embed.set_author(name=ctx.author.name, icon_url=ctx.author.avatar.url)
-
+        pages = []
         quiz_types = session.query(QuizType).all()
         for quiz_type in quiz_types:
+
+            # create the embed object
+            embed = discord.Embed(title="")
+
+            # set the author
+            embed.set_author(name=ctx.author.name, icon_url=ctx.author.avatar.url)
+
             embed.add_field(
                 name=f"{quiz_type.emoji} {quiz_type.type}", value="", inline=False
             )
@@ -814,11 +814,10 @@ async def my_stats(ctx: commands.Context, user_id: Optional[int] = None):
                 daily_quiz_reset_time=DAILY_QUIZ_RESET_TIME,
             )
 
-            # Linebreak unless last quiz type
-            if quiz_type != quiz_types[-1]:
-                embed.add_field(name="\u200b", value="", inline=False)
+            pages.append(embed)
 
-    await ctx.send(embed=embed)
+    paginator = EmbedPaginatorSession(ctx, *pages)
+    await paginator.run()
 
 
 async def generate_stats_embed_content(
@@ -1168,6 +1167,12 @@ async def my_song_guesses(ctx: Context, user_id: Optional[int] = None):
             mgpages=mgpages,
             ctx=ctx,  # Pass ctx to the generator
         )
+
+        print(mgpages)
+
+        if not mgpages:
+            await ctx.send(f"{ctx.author.mention} You don't have any song guesses yet.")
+            return
 
         paginator = EmbedPaginatorSession(ctx, *mgpages)
         await paginator.run()
