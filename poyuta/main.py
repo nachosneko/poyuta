@@ -1806,6 +1806,18 @@ async def post_yesterdays_quiz_results():
                 color=0xBBE6F3,
             )
 
+            if not yesterday_quiz:
+                embed.add_field(
+                    name=f"There was no {quiz_type.type} quiz yesterday.",
+                    value="",
+                    inline=False,
+                )
+                # send it on every channels set as quiz channel
+                for quiz_channel in session.query(QuizChannels).all():
+                    channel = bot.get_channel(quiz_channel.id_channel)
+                    await channel.send(embed=embed)
+                continue
+
             embed.set_footer(
                 text=f"Quiz ID: {yesterday_quiz.id}",
             )
