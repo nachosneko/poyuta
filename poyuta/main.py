@@ -5,7 +5,8 @@ import numpy as np
 from datetime import datetime, date, timedelta, time
 from typing import Optional
 from typing import List
-from collections import defaultdict
+from collections import OrderedDict
+from itertools import islice
 
 # Discord
 import discord
@@ -766,7 +767,7 @@ async def answer_bonus_quiz(
             return
 
 
-@bot.command(name="mystats", aliases=["stats"])
+@bot.command(name="mystats", aliases=["stats", "ms"])
 # Add other decorators as needed
 async def my_stats(ctx: commands.Context, user_id: Optional[int] = None):
     """
@@ -776,6 +777,7 @@ async def my_stats(ctx: commands.Context, user_id: Optional[int] = None):
     ---------
     !mystats
     !stats
+    !ms
     """
 
     with bot.session as session:
@@ -813,6 +815,8 @@ async def my_stats(ctx: commands.Context, user_id: Optional[int] = None):
                 quiz_type=quiz_type,
                 daily_quiz_reset_time=DAILY_QUIZ_RESET_TIME,
             )
+
+            embed.add_field(name="", value="", inline=False)
 
             pages.append(embed)
 
@@ -1078,7 +1082,7 @@ async def my_male_guesses(ctx: Context, user_id: Optional[int] = None):
         await paginator.run()
 
 
-@bot.command(name="myimageguesses", aliases=["mig", "imageguesses", "mi"])
+@bot.command(name="myimageguesses", aliases=["mig", "imageguesses", "ig"])
 async def my_image_guesses(ctx: Context, user_id: Optional[int] = None):
     """
     Get your image stats.
@@ -1088,7 +1092,7 @@ async def my_image_guesses(ctx: Context, user_id: Optional[int] = None):
     !myimageguesses
     !mig
     !imageguesses
-    !mi
+    !ig
     """
 
     with bot.session as session:
@@ -1125,7 +1129,7 @@ async def my_image_guesses(ctx: Context, user_id: Optional[int] = None):
         await paginator.run()
 
 
-@bot.command(name="mysongguesses", aliases=["msg", "songguesses", "ms"])
+@bot.command(name="mysongguesses", aliases=["msg", "songguesses", "sg"])
 async def my_song_guesses(ctx: Context, user_id: Optional[int] = None):
     """
     Get your song stats.
@@ -1135,7 +1139,7 @@ async def my_song_guesses(ctx: Context, user_id: Optional[int] = None):
     !mysongguesses
     !msg
     !songguesses
-    !ms
+    !sg
     """
 
     with bot.session as session:
@@ -1167,8 +1171,6 @@ async def my_song_guesses(ctx: Context, user_id: Optional[int] = None):
             mgpages=mgpages,
             ctx=ctx,  # Pass ctx to the generator
         )
-
-        print(mgpages)
 
         if not mgpages:
             await ctx.send(f"{ctx.author.mention} You don't have any song guesses yet.")
@@ -1374,7 +1376,7 @@ async def current_top(ctx: commands.Context):
                 Quiz.date < tomorrow_reset_date,
                 Answer.answer != "\\Bonus Answer\\",
             )
-            .order_by(Answer.answer_time)
+            .order_by(QuizType.id, Answer.answer_time)
             .all()
         )
 
@@ -1382,26 +1384,61 @@ async def current_top(ctx: commands.Context):
             await ctx.send(f"No valid answers found.")
             return
 
-        embed = discord.Embed(title="Today's Top Guesses")
+        pages = []
 
-        quiz_types = defaultdict(list)
+        # Initialize quiz_types to group answers by their type, and keep the order based on QuizType.id
+        quiz_types = OrderedDict()
         medals = [":first_place:", ":second_place:", ":third_place:"]
+
+        # Group answers by quiz type
         for answer, quiz_type in fastest_answers:
+            if quiz_type.type not in quiz_types:
+                quiz_types[quiz_type.type] = []
             quiz_types[quiz_type.type].append(
                 (answer.user.id, answer.answer_time, quiz_type.emoji)
             )
 
-        for quiz_type, user_times in quiz_types.items():
-            user_times = sorted(user_times, key=lambda x: x[1])
+        # Convert quiz_types dict into a list of tuples so we can chunk it
+        quiz_type_items = list(quiz_types.items())
 
-            value = ""
-            for i, (user_id, time, emoji) in enumerate(user_times[:10]):
-                rank = f"{medals[i]} " if i < 3 else f"#{i + 1}: "
-                value += f"> {rank} <@{user_id}> - **{time:.2f}s** \n"
+        # Helper function to chunk quiz types into groups of 2
+        def chunked(iterable, size):
+            it = iter(iterable)
+            return iter(lambda: tuple(islice(it, size)), ())
 
-            embed.add_field(name=f"> {emoji} {quiz_type}", value=value, inline=True)
+        # Iterate over the quiz type chunks
+        for quiz_type_chunk in chunked(quiz_type_items, 2):
+            embed = discord.Embed(
+                title="Today's Top Guesses",
+                description="Fastest answers by type",
+                color=0x2F3136,
+            )
 
-    await ctx.send(embed=embed)
+            # Add up to two fields (quiz types) to each embed
+            for quiz_type, user_times in quiz_type_chunk:
+                user_times = sorted(user_times, key=lambda x: x[1])
+
+                value = ""
+                for i, (user_id, time, emoji) in enumerate(user_times[:10]):
+                    rank = f"{medals[i]} " if i < 3 else f"#{i + 1}: "
+                    value += f"> {rank} <@{user_id}> - **{time:.2f}s**\n"
+
+                # Add a field for this quiz type
+                emoji = user_times[0][2] if user_times else ""
+                embed.add_field(
+                    name=f"> {emoji} {quiz_type}",
+                    value=value or "No data.",
+                    inline=True,
+                )
+
+            embed.add_field(name="", value="", inline=False)
+
+            # Append this embed to the pages list
+            pages.append(embed)
+
+        # Start pagination session
+        session = EmbedPaginatorSession(ctx, *pages)
+        await session.run()
 
 
 @bot.command(name="seiyuuleaderboard", aliases=["slb"])
@@ -1763,6 +1800,8 @@ async def history(interaction: discord.Interaction):
                 inline=True,
             )
 
+            embed.add_field(name="", value="", inline=False)
+
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
@@ -1776,7 +1815,7 @@ async def post_yesterdays_quiz_results():
     with bot.session as session:
         quiz_types = session.query(QuizType).all()
         for i, quiz_type in enumerate(quiz_types):
-            # get yesterday's male quiz
+            # get yesterday's quiz
             yesterday_quiz = (
                 session.query(Quiz)
                 .filter(Quiz.id_type == quiz_type.id, Quiz.date == yesterday)
@@ -2103,7 +2142,9 @@ class NewQuizButton(discord.ui.Button):
                 ),
             )
 
-            if self.quiz_type.type == "Image":
+            if self.quiz_type.type == "Image" and current_quiz.clip.endswith(
+                (".png", ".jpg", ".jpeg", ".gif")
+            ):
                 embed.set_image(url=current_quiz.clip)
             else:
                 embed.add_field(
@@ -2487,7 +2528,7 @@ async def planned_quizzes(interaction: discord.Interaction):
                 )
 
                 # Linebreak every two types unless last type
-                if i % 2 == 0 and i != 0 and i != len(quiz_types) - 1:
+                if (i + 1) % 2 == 0 and i != 0 and i + 1 != len(quiz_types):
                     embed.add_field(name="", value="", inline=False)
 
             # Linebreak unless last date
@@ -2741,7 +2782,7 @@ async def edit_answer(
     interaction: discord.Interaction,
     user_id: str,
     answer: str,
-    answer_time: Optional[str] = None,
+    answer_time: str,
     new_answer: Optional[str] = None,
     new_answer_time: Optional[str] = None,
     is_correct: Optional[bool] = None,
