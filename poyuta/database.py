@@ -29,6 +29,18 @@ INITIAL_QUIZ_TYPES = [
         "type": "Female Seiyuu",
         "emoji": ":female_sign:",
     },
+    {
+        "type": "Male Image",
+        "emoji": ":frame_photo:",
+    },
+    {
+        "type": "Female Image",
+        "emoji": ":frame_photo:",
+    },
+    {
+        "type": "Song",
+        "emoji": ":microphone2: ",
+    },
 ]
 
 
