@@ -166,9 +166,9 @@ async def help(ctx, command: str = None):
     # General commands list
     general_commands = [
         (f"{config['COMMAND_PREFIX']}male ||my_answer||"),
-        (f"{config['COMMAND_PREFIX']}malecharacter ||my_answer||"),
+        (f"{config['COMMAND_PREFIX']}malebonus ||my_answer||"),
         (f"{config['COMMAND_PREFIX']}female ||my_answer||"),
-        (f"{config['COMMAND_PREFIX']}femalecharacter ||my_answer||"),
+        (f"{config['COMMAND_PREFIX']}femalebonus ||my_answer||"),
         (f"{config['COMMAND_PREFIX']}maleimage ||my_answer||"),
         (f"{config['COMMAND_PREFIX']}maleimagebonus ||my_answer||"),
         (f"{config['COMMAND_PREFIX']}femaleimage ||my_answer||"),
@@ -418,7 +418,7 @@ async def answer_quiz_type(
     if not answer:
         embed.add_field(
             name="Invalid",
-            value=f"Please provide an answer: `!{quiz_type_name.lower()} ||your answer||`",
+            value=f"Please provide an answer: `!{quiz_type_name.lower().replace(' ', '')} ||your answer||`",
             inline=True,
         )
 
@@ -467,7 +467,7 @@ async def answer_quiz_type(
             if quiz.bonus_answer and not has_correct_bonus:
                 embed.add_field(
                     name="Invalid",
-                    value=f"You have already answered correctly for today's {quiz_type_name} quiz.\nBut you haven't answered the bonus character point yet. Use `!{quiz_type_name.lower()}character ||your answer||` to answer it.",
+                    value=f"You have already answered correctly for today's {quiz_type_name} quiz.\nBut you haven't answered the bonus character point yet. Use `!{quiz_type_name.lower().replace(' ', '')}bonus ||your answer||` to answer it.",
                     inline=True,
                 )
 
@@ -528,7 +528,7 @@ async def answer_quiz_type(
         if re.search(user_answer_pattern, quiz_answer, re.IGNORECASE):
             # if they don't have a bonus point yet
             if not has_correct_bonus and quiz.bonus_answer:
-                bonus_point_feedback = f" (you can also try to get the bonus point using `!{quiz_type_name.lower()}character ||your answer||`)"
+                bonus_point_feedback = f" (you can also try to get the bonus point using `!{quiz_type_name.lower().replace(' ', '')}bonus ||your answer||`)"
             else:
                 bonus_point_feedback = ""
 
@@ -571,7 +571,7 @@ async def answer_quiz_type(
 # --- Answering character --- #
 
 
-@bot.command(name="malecharacter", aliases=["mc", "ma", "maleanime"])
+@bot.command(name="malebonus", aliases=["mb", "malecharacter", "mc", "ma", "maleanime"])
 # Add other decorators as needed
 async def male_bonus_answer_quiz(
     ctx: commands.Context,
@@ -588,6 +588,8 @@ async def male_bonus_answer_quiz(
 
     Examples
     ---------
+    !malebonus ||your answer||
+    !mb ||your answer||
     !malecharacter ||your answer||
     !ma ||your answer||
     """
@@ -603,7 +605,9 @@ async def male_bonus_answer_quiz(
     )
 
 
-@bot.command(name="femalecharacter", aliases=["fc", "fa", "femaleanime"])
+@bot.command(
+    name="femalebonus", aliases=["fb", "femalecharacter", "fc", "fa", "femaleanime"]
+)
 # Add other decorators as needed
 async def female_bonus_answer_quiz(
     ctx: commands.Context,
@@ -620,6 +624,8 @@ async def female_bonus_answer_quiz(
 
     Examples
     ---------
+    !femalebonus ||your answer||
+    !fb ||your answer||
     !femalecharacter ||your answer||
     !fc ||your answer||
     """
@@ -659,7 +665,7 @@ async def song_bonus_answer_quiz(ctx: commands.Context, *answer: str):
     answer = " ".join(answer)
 
     await answer_bonus_quiz(
-        ctx=ctx, quiz_type_id=3, quiz_type_name="Song", answer=answer
+        ctx=ctx, quiz_type_id=5, quiz_type_name="Song", answer=answer
     )
 
 
@@ -687,7 +693,7 @@ async def male_image_bonus_answer_quiz(ctx: commands.Context, *answer: str):
     answer = " ".join(answer)
 
     await answer_bonus_quiz(
-        ctx=ctx, quiz_type_id=4, quiz_type_name="Male Image", answer=answer
+        ctx=ctx, quiz_type_id=3, quiz_type_name="Male Image", answer=answer
     )
 
 
@@ -748,7 +754,7 @@ async def answer_bonus_quiz(
     if not answer:
         embed.add_field(
             name="Invalid",
-            value=f"Please provide an answer: `!{quiz_type_name.lower()}bonus ||your answer||`",
+            value=f"Please provide an answer: `!{quiz_type_name.lower().replace(' ', '')}bonus ||your answer||`",
             inline=True,
         )
         await ctx.send(embed=embed)
@@ -810,7 +816,7 @@ async def answer_bonus_quiz(
                 name="Invalid",
                 value=(
                     f"You haven't correctly answered today's {quiz_type_name} quiz yet.\n"
-                    f"Use `!{quiz_type_name.lower()} ||your answer||` to submit your main answer first."
+                    f"Use `!{quiz_type_name.lower().replace(' ', '')} ||your answer||` to submit your main answer first."
                 ),
                 inline=True,
             )
@@ -2323,6 +2329,11 @@ class NewQuizButton(discord.ui.Button):
                 "Male Image",
                 "Female Image",
             ] and current_quiz.clip.endswith((".png", ".jpg", ".jpeg", ".gif")):
+                embed.add_field(
+                    name="",
+                    value=current_quiz.clip,
+                    inline=True,
+                )
                 embed.set_image(url=current_quiz.clip)
             else:
                 embed.add_field(
