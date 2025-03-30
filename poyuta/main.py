@@ -169,12 +169,16 @@ async def help(ctx, command: str = None):
         (f"{config['COMMAND_PREFIX']}malecharacter ||my_answer||"),
         (f"{config['COMMAND_PREFIX']}female ||my_answer||"),
         (f"{config['COMMAND_PREFIX']}femalecharacter ||my_answer||"),
-        (f"{config['COMMAND_PREFIX']}image ||my_answer||"),
+        (f"{config['COMMAND_PREFIX']}maleimage ||my_answer||"),
+        (f"{config['COMMAND_PREFIX']}maleimagebonus ||my_answer||"),
+        (f"{config['COMMAND_PREFIX']}femaleimage ||my_answer||"),
+        (f"{config['COMMAND_PREFIX']}femaleimagebonus ||my_answer||"),
         (f"{config['COMMAND_PREFIX']}song ||my_answer||"),
         (f"{config['COMMAND_PREFIX']}mystats"),
         (f"{config['COMMAND_PREFIX']}myfemaleguesses"),
         (f"{config['COMMAND_PREFIX']}mymaleguesses"),
-        (f"{config['COMMAND_PREFIX']}myimageguesses"),
+        (f"{config['COMMAND_PREFIX']}maleimageguesses"),
+        (f"{config['COMMAND_PREFIX']}femaleimageguesses"),
         (f"{config['COMMAND_PREFIX']}mysongguesses"),
         (f"{config['COMMAND_PREFIX']}topspeed"),
         (f"{config['COMMAND_PREFIX']}currenttop"),
@@ -295,10 +299,10 @@ async def female_answer_quiz(ctx: commands.Context):
     )
 
 
-@bot.command(name="image", aliases=["i"])
-async def image_answer_quiz(ctx: commands.Context):
+@bot.command(name="maleimage", aliases=["mi"])
+async def male_image_answer_quiz(ctx: commands.Context):
     """
-    Answer today's image quiz.
+    Answer today's male image quiz.
     Please use ||spoiler tags|| to hide your answer.
 
     Arguments
@@ -308,8 +312,8 @@ async def image_answer_quiz(ctx: commands.Context):
 
     Examples
     ---------
-    !image ||your answer||
-    !i ||your answer||
+    !maleimage ||your answer||
+    !mi ||your answer||
     """
 
     answer = ctx.message.content.split(" ", 1)[1:]
@@ -321,7 +325,37 @@ async def image_answer_quiz(ctx: commands.Context):
     answer = " ".join(answer)
 
     await answer_quiz_type(
-        ctx=ctx, quiz_type_id=3, quiz_type_name="Image", answer=answer
+        ctx=ctx, quiz_type_id=3, quiz_type_name="Male Image", answer=answer
+    )
+
+
+@bot.command(name="femaleimage", aliases=["fi"])
+async def female_image_answer_quiz(ctx: commands.Context):
+    """
+    Answer today's female image quiz.
+    Please use ||spoiler tags|| to hide your answer.
+
+    Arguments
+    ---------
+    answer : str
+        The answer to the quiz.
+
+    Examples
+    ---------
+    !femaleimage ||your answer||
+    !fi ||your answer||
+    """
+
+    answer = ctx.message.content.split(" ", 1)[1:]
+
+    # edit their message to hide the answer
+    await ctx.message.delete()
+
+    # join the answer
+    answer = " ".join(answer)
+
+    await answer_quiz_type(
+        ctx=ctx, quiz_type_id=4, quiz_type_name="Female Image", answer=answer
     )
 
 
@@ -351,7 +385,7 @@ async def song_answer_quiz(ctx: commands.Context):
     answer = " ".join(answer)
 
     await answer_quiz_type(
-        ctx=ctx, quiz_type_id=4, quiz_type_name="Song", answer=answer
+        ctx=ctx, quiz_type_id=5, quiz_type_name="Song", answer=answer
     )
 
 
@@ -601,24 +635,108 @@ async def female_bonus_answer_quiz(
     )
 
 
+@bot.command(name="songbonus", aliases=["sb", "songb"])
+async def song_bonus_answer_quiz(ctx: commands.Context, *answer: str):
+    """
+    Answer today's song quiz bonus.
+    Please use ||spoiler tags|| to hide your answer.
+
+    Arguments
+    ---------
+    answer : str
+        The answer to the quiz.
+
+    Examples
+    ---------
+    !songbonus ||your answer||
+    !sb ||your answer||
+    """
+
+    # Delete the user's message to hide the answer
+    await ctx.message.delete()
+
+    # Join the provided answer parts into a single string
+    answer = " ".join(answer)
+
+    await answer_bonus_quiz(
+        ctx=ctx, quiz_type_id=3, quiz_type_name="Song", answer=answer
+    )
+
+
+@bot.command(name="maleimagebonus", aliases=["mib"])
+async def male_image_bonus_answer_quiz(ctx: commands.Context, *answer: str):
+    """
+    Answer today's male image quiz bonus.
+    Please use ||spoiler tags|| to hide your answer.
+
+    Arguments
+    ---------
+    answer : str
+        The answer to the quiz.
+
+    Examples
+    ---------
+    !maleimagebonus ||your answer||
+    !mib ||your answer||
+    """
+
+    # Delete the user's message to hide the answer
+    await ctx.message.delete()
+
+    # Join the provided answer parts into a single string
+    answer = " ".join(answer)
+
+    await answer_bonus_quiz(
+        ctx=ctx, quiz_type_id=4, quiz_type_name="Male Image", answer=answer
+    )
+
+
+@bot.command(name="femaleimagebonus", aliases=["fib"])
+async def female_image_bonus_answer_quiz(ctx: commands.Context, *answer: str):
+    """
+    Answer today's female image quiz bonus.
+    Please use ||spoiler tags|| to hide your answer.
+
+    Arguments
+    ---------
+    answer : str
+        The answer to the quiz.
+
+    Examples
+    ---------
+    !femaleimagebonus ||your answer||
+    !fib ||your answer||
+    """
+
+    # Delete the user's message to hide the answer
+    await ctx.message.delete()
+
+    # Join the provided answer parts into a single string
+    answer = " ".join(answer)
+
+    await answer_bonus_quiz(
+        ctx=ctx, quiz_type_id=4, quiz_type_name="Female Image", answer=answer
+    )
+
+
 async def answer_bonus_quiz(
     ctx: commands.Context,
     quiz_type_id: int,
     quiz_type_name: str,
     answer: str,
 ):
-    """try to get the bonus character point once you have answered the quiz correctly."""
+    """
+    Attempt to earn the bonus point for today's quiz, once the main quiz has been answered correctly.
+    """
 
     answer_time = datetime.now()
 
+    # Sanitize the answer
     answer = answer.replace('"', "")
-
-    # remove spoiler tags if present
-    answer = re.sub(r"\|\|", "", answer)
-    answer = answer.strip()
+    answer = re.sub(r"\|\|", "", answer).strip()
 
     embed = discord.Embed(
-        title=f"{quiz_type_name} Quiz Results",
+        title=f"{quiz_type_name} Quiz Bonus Results",
         color=0xBBE6F3,
     )
 
@@ -630,43 +748,38 @@ async def answer_bonus_quiz(
     if not answer:
         embed.add_field(
             name="Invalid",
-            value=f"Please provide an answer: `!{quiz_type_name.lower()} ||your answer||`",
+            value=f"Please provide an answer: `!{quiz_type_name.lower()}bonus ||your answer||`",
             inline=True,
         )
-
         await ctx.send(embed=embed)
         return
 
-    # check that he answered correctly first
     with bot.session as session:
         current_quiz_date = get_current_quiz_date(
             daily_quiz_reset_time=DAILY_QUIZ_RESET_TIME
         )
 
-        # get quiz for this date and type
         quiz = (
             session.query(Quiz)
             .filter(Quiz.id_type == quiz_type_id, Quiz.date == current_quiz_date)
             .first()
         )
+
         if not quiz:
             embed.add_field(
                 name="Invalid",
-                value=f"No {quiz_type_name} quiz today :disappointed_relieved:",
+                value=f"No {quiz_type_name} quiz available today. :disappointed_relieved:",
                 inline=True,
             )
-
             await ctx.send(embed=embed)
             return
 
-        # check quiz has a bonus answer
         if not quiz.bonus_answer:
             embed.add_field(
                 name="Invalid",
-                value=f"There is no bonus character point for today's {quiz_type_name} quiz.",
+                value=f"There is no bonus available for today's {quiz_type_name} quiz.",
                 inline=True,
             )
-
             await ctx.send(embed=embed)
             return
 
@@ -681,6 +794,7 @@ async def answer_bonus_quiz(
             )
             .first()
         )
+
         has_correct_bonus = (
             session.query(Answer)
             .filter(
@@ -694,24 +808,25 @@ async def answer_bonus_quiz(
         if not has_correct_answer:
             embed.add_field(
                 name="Invalid",
-                value=f"You haven't answered correctly for today's {quiz_type_name} seiyuu quiz.\nUse `!{quiz_type_name.lower()} ||your answer||` to answer before trying out the bonus.",
+                value=(
+                    f"You haven't correctly answered today's {quiz_type_name} quiz yet.\n"
+                    f"Use `!{quiz_type_name.lower()} ||your answer||` to submit your main answer first."
+                ),
                 inline=True,
             )
-
-            return
-
-        # check that the user hasn't already answered the bonus point
-        if has_correct_bonus:
-            embed.add_field(
-                name="Invalid",
-                value=f"You have already answered the bonus character point for today's {quiz_type_name} quiz.",
-                inline=True,
-            )
-
             await ctx.send(embed=embed)
             return
 
-        # get the time at which the user clicked the button
+        if has_correct_bonus:
+            embed.add_field(
+                name="Already Completed",
+                value=f"You have already claimed the bonus for today's {quiz_type_name} quiz.",
+                inline=True,
+            )
+            await ctx.send(embed=embed)
+            return
+
+        # Retrieve the user's quiz start time for time calculation
         start_quiz_timestamp = (
             session.query(UserStartQuizTimestamp)
             .filter(
@@ -721,16 +836,17 @@ async def answer_bonus_quiz(
             .first()
         )
 
-        # compute answer time in seconds
-        answer_time = answer_time - start_quiz_timestamp.timestamp
-        answer_time = round(answer_time.total_seconds(), 3)
+        # Calculate answer time
+        answer_duration = answer_time - start_quiz_timestamp.timestamp
+        answer_duration_sec = round(answer_duration.total_seconds(), 3)
 
+        # Prepare the new answer entry
         new_answer = Answer(
             user_id=user.id,
             quiz_id=quiz.id,
             answer="\\Bonus Answer\\",
             bonus_answer=answer,
-            answer_time=answer_time,
+            answer_time=answer_duration_sec,
             is_correct=False,
         )
 
@@ -746,25 +862,22 @@ async def answer_bonus_quiz(
             session.commit()
 
             embed.add_field(
-                name="Answer",
-                value=f"✅ Correct in {answer_time}s!",
+                name="Bonus Answer",
+                value=f"✅ Correct! You claimed the bonus in {answer_duration_sec}s.",
                 inline=True,
             )
-
-            await ctx.send(embed=embed)
-            return
         else:
             new_answer.is_bonus_point = False
             session.add(new_answer)
             session.commit()
 
             embed.add_field(
-                name="Answer",
-                value="❌ Incorrect! Still no bonus character point for you :disappointed_relieved:",
+                name="Bonus Answer",
+                value="❌ Incorrect! Better luck next time. :disappointed_relieved:",
                 inline=True,
             )
-            await ctx.send(embed=embed)
-            return
+
+        await ctx.send(embed=embed)
 
 
 @bot.command(name="mystats", aliases=["stats", "ms"])
@@ -1031,6 +1144,12 @@ async def my_female_guesses(ctx: Context, user_id: Optional[int] = None):
             ctx=ctx,  # Pass ctx to the generator
         )
 
+        if not mgpages:
+            await ctx.send(
+                f"{ctx.author.mention} You don't have any female guesses yet."
+            )
+            return
+
         paginator = EmbedPaginatorSession(ctx, *mgpages)
         await paginator.run()
 
@@ -1078,21 +1197,23 @@ async def my_male_guesses(ctx: Context, user_id: Optional[int] = None):
             ctx=ctx,  # Pass ctx to the generator
         )
 
+        if not mgpages:
+            await ctx.send(f"{ctx.author.mention} You don't have any male guesses yet.")
+            return
+
         paginator = EmbedPaginatorSession(ctx, *mgpages)
         await paginator.run()
 
 
-@bot.command(name="myimageguesses", aliases=["mig", "imageguesses", "ig"])
+@bot.command(name="maleimageguesses", aliases=["mig"])
 async def my_image_guesses(ctx: Context, user_id: Optional[int] = None):
     """
-    Get your image stats.
+    Get your male image stats.
 
     Examples
     ---------
-    !myimageguesses
+    !maleimageguesses
     !mig
-    !imageguesses
-    !ig
     """
 
     with bot.session as session:
@@ -1125,6 +1246,63 @@ async def my_image_guesses(ctx: Context, user_id: Optional[int] = None):
             ctx=ctx,  # Pass ctx to the generator
         )
 
+        if not mgpages:
+            await ctx.send(
+                f"{ctx.author.mention} You don't have any male image guesses yet."
+            )
+            return
+
+        paginator = EmbedPaginatorSession(ctx, *mgpages)
+        await paginator.run()
+
+
+@bot.command(name="femaleimageguesses", aliases=["fig"])
+async def my_image_guesses(ctx: Context, user_id: Optional[int] = None):
+    """
+    Get your female image stats.
+
+    Examples
+    ---------
+    !femaleimageguesses
+    !fig
+    """
+
+    with bot.session as session:
+        # get the user
+        user = (
+            get_user(session=session, user=ctx.author, add_if_not_exist=True)
+            if not user_id
+            else get_user_from_id(session=session, user_id=user_id)
+        )
+
+        if not user:
+            await ctx.send(f"{ctx.author.mention} You don't have any guesses yet.")
+            return
+
+        quiz_type = session.query(QuizType).get(4)
+        mgpages = []
+
+        # create the embed object for each quiz type
+        embed = discord.Embed(title=f"Top Guesses for {quiz_type.type}")
+        embed.set_author(name=ctx.author.name, icon_url=ctx.author.avatar.url)
+
+        # generate the embed content for this quiz_type
+        await generate_guesses_embed_content(
+            session=session,
+            embed=embed,
+            user_id=user.id,
+            quiz_type=quiz_type,
+            daily_quiz_reset_time=DAILY_QUIZ_RESET_TIME,
+            mgpages=mgpages,
+            ctx=ctx,  # Pass ctx to the generator
+        )
+
+        if not mgpages:
+            await ctx.send(
+                f"{ctx.author.mention} You don't have any female image guesses yet."
+            )
+            return
+
         paginator = EmbedPaginatorSession(ctx, *mgpages)
         await paginator.run()
 
@@ -1154,7 +1332,7 @@ async def my_song_guesses(ctx: Context, user_id: Optional[int] = None):
             await ctx.send(f"{ctx.author.mention} You don't have any guesses yet.")
             return
 
-        quiz_type = session.query(QuizType).get(4)
+        quiz_type = session.query(QuizType).get(5)
         mgpages = []
 
         # create the embed object for each quiz type
@@ -1609,7 +1787,6 @@ async def leaderboard(ctx: commands.Context):
 
             # Linebreak every two types unless last type
             if (idx_q + 1) % 2 == 0 and idx_q != 0 and idx_q + 1 != len(quiz_types):
-                print("Linebreak !", idx_q, len(quiz_types))
                 embed.add_field(name="\u200b", value="", inline=False)
 
         value = ""
@@ -2142,9 +2319,10 @@ class NewQuizButton(discord.ui.Button):
                 ),
             )
 
-            if self.quiz_type.type == "Image" and current_quiz.clip.endswith(
-                (".png", ".jpg", ".jpeg", ".gif")
-            ):
+            if self.quiz_type.type in [
+                "Male Image",
+                "Female Image",
+            ] and current_quiz.clip.endswith((".png", ".jpg", ".jpeg", ".gif")):
                 embed.set_image(url=current_quiz.clip)
             else:
                 embed.add_field(
@@ -2168,7 +2346,16 @@ class NewQuizView(discord.ui.View):
         super().__init__(timeout=None)
 
         with bot.session as session:
-            for quiz_type in session.query(QuizType).all():
+
+            quiz_types = session.query(QuizType).all()
+
+            # change the order so that any "quiz_type.type" that contains "Image" is pushed to the end of the list
+            quiz_types = sorted(
+                quiz_types,
+                key=lambda x: x.type.lower().endswith("image"),
+            )
+
+            for quiz_type in quiz_types:
                 button = NewQuizButton(quiz_type=quiz_type, new_quiz_date=new_quiz_date)
                 self.add_item(button)
 
