@@ -525,7 +525,9 @@ async def answer_quiz_type(
         )
 
         # If the pattern matches: the answer is correct
-        if re.search(user_answer_pattern, quiz_answer, re.IGNORECASE):
+        quiz_answers = quiz_answer.split("|")
+        if any(re.search(user_answer_pattern, a.strip(), re.IGNORECASE) for a in quiz_answers):
+
             # if they don't have a bonus point yet
             if not has_correct_bonus and quiz.bonus_answer:
                 bonus_point_feedback = f" (you can also try to get the bonus point using `!{quiz_type_name.lower().replace(' ', '')}bonus ||your answer||`)"
@@ -862,7 +864,8 @@ async def answer_bonus_quiz(
             input_str=answer, partial_match=False, swap_words=True
         )
 
-        if re.search(user_bonus_answer_pattern, quiz_bonus_answer, re.IGNORECASE):
+        quiz_bonus_answers = quiz_bonus_answer.split("|")
+        if any(re.search(user_bonus_answer_pattern, a.strip(), re.IGNORECASE) for a in quiz_bonus_answers):
             new_answer.is_bonus_point = True
             session.add(new_answer)
             session.commit()
@@ -2027,12 +2030,23 @@ async def post_yesterdays_quiz_results():
             )
 
             if yesterday_quiz:
-                answer_feedback = f"> Answer: ||{yesterday_quiz.answer}||"
-                bonus_feedback = (
-                    f"\n> Bonus answer: ||{yesterday_quiz.bonus_answer}||"
-                    if yesterday_quiz.bonus_answer
-                    else ""
-                )
+                quiz_answers = [a.strip() for a in yesterday_quiz.answer.split("|")]
+                if len(quiz_answers) == 1:
+                    answer_feedback = f"> Answer: ||{quiz_answers[0]}||"
+                else:
+                    formatted_answers = " / ".join(quiz_answers)
+                    answer_feedback = f"> Answers: ||{formatted_answers}||"
+
+                if yesterday_quiz.bonus_answer:
+                    bonus_answers = [b.strip() for b in yesterday_quiz.bonus_answer.split("|")]
+                    if len(bonus_answers) == 1:
+                            bonus_feedback = f"\n> Bonus answer: ||{bonus_answers[0]}||"
+                    else:
+                        formatted_bonus = " / ".join(bonus_answers)
+                        bonus_feedback = f"\n> Bonus answers: ||{formatted_bonus}||"
+                else:
+                    bonus_feedback = ""
+
                 value = f"{answer_feedback}{bonus_feedback}"
             else:
                 value = "> No quiz took place :disappointed_relieved:"
