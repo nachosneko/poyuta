@@ -22,23 +22,23 @@ SessionFactory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 INITIAL_QUIZ_TYPES = [
     {
-        "type": "Male Character",
+        "type": "Male Seiyuu",
         "emoji": ":male_sign:",
     },
     {
-        "type": "Female Character",
+        "type": "Female Seiyuu",
         "emoji": ":female_sign:",
     },
     {
-        "type": "Female Character 2",
-        "emoji": ":female_sign:",
+        "type": "Male Image",
+        "emoji": ":frame_photo:",
+    },
+    {
+        "type": "Female Image",
+        "emoji": ":frame_photo:",
     },
     {
         "type": "Song",
-        "emoji": ":microphone2:",
-    },
-    {
-        "type": "Song 2",
         "emoji": ":microphone2: ",
     },
 ]
@@ -129,29 +129,6 @@ class UserStartQuizTimestamp(Base):
 
     # ensure there's only one start quiz timestamp per user per quiz
     __table_args__ = (UniqueConstraint("user_id", "quiz_id", name="uq_userid_quizid"),)
-
-class QuizOpen(Base):
-    __tablename__ = "quiz_open"
-
-    id = sa.Column(sa.Integer, primary_key=True)
-
-    # Who opened
-    user_id = sa.Column(sa.Integer, sa.ForeignKey(User.id), nullable=False)
-    user = relationship(User, backref="opened_quizzes")
-
-    # Which quiz they opened
-    quiz_id = sa.Column(sa.Integer, sa.ForeignKey(Quiz.id), nullable=False)
-    quiz = relationship(Quiz, backref="opened_by_users")
-
-    # When they opened it
-    opened_at = sa.Column(sa.DateTime, nullable=False)
-
-    # Don't allow the same user to "open" the same quiz twice
-    __table_args__ = (
-        UniqueConstraint("user_id", "quiz_id", name="uq_quizopen_user_quiz"),
-    )
-
-
 
 
 def initialize_database(
