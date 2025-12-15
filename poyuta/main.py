@@ -122,12 +122,12 @@ async def on_message(message):
     if message.channel.id in [
         channel.id_sub_channel for channel in submission_channels
     ]:
-        # Delete the message if it's in a submission channel
-        await message.delete()
+        try: 
+            await message.delete() # Delete the message if it's in a submission channel
+        except discord.NotFound:
+            pass
     else:
-        # Process other commands if the message is not in a submission channel
-        await bot.process_commands(message)
-
+        await bot.process_commands(message) # Process other commands if the message is not in a submission channel
 
 # attempt to decorate up the help command
 bot.remove_command("help")
@@ -293,6 +293,32 @@ def is_duplicate_attempt(previous: str, current: str) -> bool:
     pattern = process_user_input(previous, partial_match=False, swap_words=True)
     return re.fullmatch(pattern, current, re.IGNORECASE) is not None
 
+# Helper: compute which hint (if any) should be shown for a user for a quiz
+def get_hint(session, user_id: int, quiz_id: int):
+    """
+    Returns (prior_incorrect_count, hint_text) or (None, None) if no hint available.
+
+    prior_incorrect_count is the number of incorrect non-bonus attempts BEFORE
+    the current attempt. The returned hint_text may be an empty string "" which
+    means "this hint slot is intentionally empty" (i.e. consume it but show nothing).
+    """
+    prior_incorrect_count = session.query(Answer).filter(
+        Answer.user_id == user_id,
+        Answer.quiz_id == quiz_id,
+        Answer.answer != "\\Bonus Answer\\",
+        Answer.is_correct == False
+    ).count()
+
+    quiz_row = session.query(Quiz).filter_by(id=quiz_id).first()
+    if not quiz_row:
+        return None, None
+
+    hints_list = (quiz_row.hints or "").split("|")
+
+    if prior_incorrect_count < len(hints_list):
+        return prior_incorrect_count, hints_list[prior_incorrect_count]
+    return None, None
+
 
 class PostResultView(discord.ui.View):
     def __init__(self, embed: discord.Embed, user: discord.User, hints: Optional[List[str]] = None):
@@ -447,14 +473,7 @@ async def answer_quiz_slash(
             )
 
             # Determine hint to show (if incorrect)
-            # Count prior incorrect attempts (non-bonus) BEFORE storing this attempt
-            prior_incorrect_count = session.query(Answer).filter(Answer.user_id == user.id, Answer.quiz_id == quiz.id, Answer.answer != "\\Bonus Answer\\", Answer.is_correct == False).count()
-            # prior_incorrect_count = 0 means this is the user's first incorrect attempt
-            hints_list = [h.strip() for h in (quiz.hints or "").split("|") if h.strip()]
-            hint_to_show = None
-            if not is_correct and prior_incorrect_count < len(hints_list):
-                # show nth hint: prior_incorrect_count -> hint index
-                hint_to_show = hints_list[prior_incorrect_count]
+            prior_incorrect_count, hint_to_show = get_hint(session, user.id, quiz.id)
 
             # Build embed message
             if is_correct:
@@ -472,7 +491,12 @@ async def answer_quiz_slash(
                 close_feedback = f" ({similarity_percentage}%)" if similarity_percentage >= 75 else ""
                 embed.add_field(name="Answer", value=f"❌ Incorrect in {answer_duration_sec}s{close_feedback}", inline=True)
                 if hint_to_show:
-                    embed.add_field(name=f"Hint #{prior_incorrect_count + 1}", value=hint_to_show, inline=False)
+                    spoiler_hint = f"||{hint_to_show}||"
+                    embed.add_field(
+                        name=f"Hint #{prior_incorrect_count + 1}",
+                        value=spoiler_hint,
+                        inline=False
+                        )
 
                 session.add(user_answer)
                 session.commit()
@@ -945,15 +969,38 @@ async def answer_quiz_type(
                 value=f"❌ Incorrect in {answer_time}s {close_feedback}",
                 inline=True,
             )
+            # --- Determine hint index BEFORE storing this attempt (same as slash logic) ---
+            prior_incorrect_count, hint_to_show = get_hint(session, user.id, quiz.id)
 
-            # Store the user's answer in the Answer table
+            # Persist the incorrect attempt
             with bot.session as session:
                 user_answer.is_correct = False
                 session.add(user_answer)
                 session.commit()
 
-            await ctx.send(embed=embed)
+            # --- Try to DM the user the hint (if any) ---
+            # Note: hint_to_show may be "" (intentionally empty). In that case we consume the hint
+            # (so future attempts will see the next hint) but we do not show any text.
+            if hint_to_show is not None and hint_to_show != "":
+                spoiler_hint = f"||{hint_to_show}||"
+                try:
+                    await ctx.author.send(
+                        f"Hint #{prior_incorrect_count + 1} for today's {quiz_type_name} quiz:\n{spoiler_hint}"
+                    )
+                except discord.Forbidden:
+                    # DMs closed: do not leak the hint content publicly.
+                    # Send a short ephemeral notice so they can open DMs (auto-delete).
+                    try:
+                        await ctx.send(
+                            f"{ctx.author.mention}, I tried to DM you a hint but your DMs are closed. "
+                            "Open DMs to receive hints.",
+                            delete_after=8
+                        )
+                    except Exception:
+                        pass
 
+            # Send the result embed to the channel (no hint content in the channel)
+            await ctx.send(embed=embed)
             return
 
 
@@ -3089,9 +3136,9 @@ async def postquizbuttons(ctx):
 @app_commands.describe(
     quiz_type="type of the quiz to add",
     new_clip="input new clip",
-    new_answer="input new seiyuu",
-    new_bonus_answer="The bonus character answer for the quiz",
-    hints="Optional hints separated by | (hint1|hint2|hint3)"
+    new_answer="input new answer",
+    new_bonus_answer="the bonus answer for the quiz",
+    hints="optional hints, separated by | (hint1|hint2|hint3)"
 )
 async def new_quiz(
     interaction: discord.Interaction,
@@ -3490,11 +3537,11 @@ async def queue(interaction: discord.Interaction):
     quiz_date="date of the quiz to update in YYYY-MM-DD format",
     quiz_type="type of the quiz to update",
     new_clip="input new clip",
-    new_answer="input new seiyuu",
-    new_bonus_answer="the bonus character answer for the quiz.",
+    new_answer="input new answer",
+    new_bonus_answer="the bonus answer for the quiz.",
     new_hints= "the hints for the quiz",
     clear_button_clicks="clears everyone's button clicks for the selected quiz type. only use if the clip link is broken for everyone.",
-    clear_attempts="clears everyone's attempts for the selected quiz type. only use if you want to change the seiyuu clip and answer altogether.",
+    clear_attempts="clears everyone's attempts for the selected quiz type. only use if you want to change the clip and answer altogether.",
     delete_quiz="delete the quiz for targetted date.",
 )
 async def edit_quiz(
