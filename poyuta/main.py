@@ -1,20 +1,25 @@
 # Standard libraries
 import re
+import os
+import shutil
 import random
+import asyncio
+import sqlite3
 import numpy as np
 from datetime import datetime, date, timedelta, time
 from typing import Optional
 from typing import List
 from collections import OrderedDict
 from itertools import islice
+from difflib import SequenceMatcher
 
 # Discord
 import discord
 from discord import app_commands, Embed, Button, ButtonStyle
+from discord.ui import View, Button
 from discord.ext import commands
 from discord.ext.commands import Context
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-
 
 # Database
 from sqlalchemy import case, func, desc, or_
@@ -54,7 +59,6 @@ DAILY_QUIZ_RESET_TIME = datetime.strptime(
 intents = discord.Intents.all()
 intents.reactions = True
 intents.messages = True
-
 
 initialize_database(
     config["DEFAULT_ADMIN_ID"],
@@ -180,7 +184,6 @@ async def help(ctx, command: str = None):
         (f"{config['COMMAND_PREFIX']}maleimageguesses"),
         (f"{config['COMMAND_PREFIX']}femaleimageguesses"),
         (f"{config['COMMAND_PREFIX']}mysongguesses"),
-        (f"{config['COMMAND_PREFIX']}topspeed"),
         (f"{config['COMMAND_PREFIX']}currenttop"),
         (f"{config['COMMAND_PREFIX']}leaderboard"),
         (f"{config['COMMAND_PREFIX']}seiyuuleaderboard"),
@@ -235,10 +238,360 @@ async def help(ctx, command: str = None):
     # Send the embed
     await session.run()
 
+# --- Slash Answers --- #
+
+QUIZ_TYPES = {
+    "male": 1, "ms": 1,
+    "female": 2, "fs": 2,
+    "maleimage": 3, "mi": 3,
+    "femaleimage": 4, "fi": 4,
+    "song": 5, "s": 5,
+}
+
+QUIZ_TYPE_TITLES = {
+    "ms": "Male Seiyuu Quiz",
+    "male": "Male Seiyuu Quiz",
+    "fs": "Female Seiyuu Quiz",
+    "female": "Female Seiyuu Quiz",
+    "mi": "Male Image Quiz",
+    "maleimage": "Male Image Quiz",
+    "fi": "Female Image Quiz",
+    "femaleimage": "Female Image Quiz",
+    "s": "Song Quiz",
+    "song": "Song Quiz",
+}
+
+
+def get_user_rank_for_quiz(session, quiz_id, user_id):
+    """
+    Returns the global rank of the user for this quiz (based on answer_time).
+    Rank 1 = fastest.
+    If user never answered → return None.
+    """
+
+    # Pull all correct answers once
+    answers = (
+        session.query(Answer)
+        .filter(Answer.quiz_id == quiz_id, Answer.is_correct == True)
+        .order_by(Answer.answer_time.asc())
+        .all()
+    )
+
+    for idx, ans in enumerate(answers):
+        if ans.user_id == user_id:
+            return idx + 1  # ranks start at #1
+
+    return None
+
+        # Helper function for duplicate detection
+def is_duplicate_attempt(previous: str, current: str) -> bool:
+    """Check if two answers are duplicates, considering regex, casing, and word swaps."""
+    if not previous or not current:
+        return False
+
+    # Compile regex pattern using your vowel/length rules + swap handling
+    pattern = process_user_input(previous, partial_match=False, swap_words=True)
+    return re.fullmatch(pattern, current, re.IGNORECASE) is not None
+
+
+class PostResultView(discord.ui.View):
+    def __init__(self, embed: discord.Embed, user: discord.User, hints: Optional[List[str]] = None):
+        super().__init__(timeout=None)
+        self.embed = embed
+        self.user = user
+        self.hints = hints or []
+
+    @discord.ui.button(label="Post it in public", style=discord.ButtonStyle.blurple)
+    async def post_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Create a copy of the embed without hints
+        public_embed = discord.Embed(
+            title=self.embed.title,
+            color=self.embed.color
+        )
+        public_embed.set_author(name=self.embed.author.name, icon_url=self.embed.author.icon_url)
+
+        # Copy all fields except hints
+        for field in self.embed.fields:
+            if field.name.startswith("Hint"):
+                continue
+            public_embed.add_field(name=field.name, value=field.value, inline=field.inline)
+
+        await interaction.channel.send(embed=public_embed)
+        await interaction.response.defer(ephemeral=True)
+
+
+@bot.tree.command(name="ping", description="Check the bot's ping.")
+async def ping(interaction: discord.Interaction):
+    latency_ms = round(bot.latency * 1000)  # bot.latency is in seconds
+    await interaction.response.send_message(f"Pong! 🏓 `{latency_ms}ms`")
+
+@bot.command(name="ping")
+async def ping(ctx: commands.Context): 
+    latency_ms = round(bot.latency * 1000)  # bot.latency is in seconds
+    await ctx.send(f"Pong! 🏓 `{latency_ms}ms`")
+
+
+async def answer_quiz_slash(
+    interaction: discord.Interaction,
+    quiz_type_name: str,
+    answer: str,
+):
+    """Universal handler for slash commands (main + bonus answers) with duplicate prevention + hints."""
+    answer_time = datetime.now()
+
+    # Clean and normalize input
+    answer = re.sub(r"\|\|", "", answer).strip()
+
+    embed = discord.Embed(
+        title=f"{QUIZ_TYPE_TITLES.get(quiz_type_name.lower(), quiz_type_name.capitalize())} Results",
+        color=0xBBE6F3,
+    )
+    embed.set_author(name=interaction.user.name, icon_url=interaction.user.avatar.url)
+
+    if not answer:
+        embed.add_field(name="Invalid", value="Please provide an answer.", inline=True)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    with bot.session as session:
+        quiz_type_id = QUIZ_TYPES[quiz_type_name.lower()]
+        current_quiz_date = get_current_quiz_date(DAILY_QUIZ_RESET_TIME)
+        quiz = session.query(Quiz).filter_by(id_type=quiz_type_id, date=current_quiz_date).first()
+
+        if not quiz:
+            await interaction.response.send_message(
+                f"No {quiz_type_name} quiz today :disappointed_relieved:", ephemeral=True
+            )
+            return
+
+        user = get_user(session=session, user=interaction.user, add_if_not_exist=True)
+
+        # Fetch user answer records
+        has_correct_answer = session.query(Answer).filter_by(
+            user_id=user.id, quiz_id=quiz.id, is_correct=True
+        ).first()
+        has_correct_bonus = session.query(Answer).filter_by(
+            user_id=user.id, quiz_id=quiz.id, is_bonus_point=True
+        ).first()
+
+        # Make sure the quiz was started
+        start_quiz_timestamp = session.query(UserStartQuizTimestamp).filter_by(
+            user_id=user.id, quiz_id=quiz.id
+        ).first()
+        if not start_quiz_timestamp:
+            embed.add_field(
+                name="Invalid",
+                value=f"You haven't started the {quiz_type_name} quiz yet.",
+                inline=True,
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
+        # Calculate time spent
+        answer_duration = answer_time - start_quiz_timestamp.timestamp
+        answer_duration_sec = round(answer_duration.total_seconds(), 3)
+
+        # Helper function for duplicate detection
+        def is_duplicate_attempt(previous: str, current: str) -> bool:
+            """Check if two answers are duplicates, considering regex, casing, and word swaps."""
+            if not previous or not current:
+                return False
+
+            # Compile regex pattern using your vowel/length rules + swap handling
+            pattern = process_user_input(previous, partial_match=False, swap_words=True)
+            return re.fullmatch(pattern, current, re.IGNORECASE) is not None
+
+        # --- MAIN QUIZ ANSWER PHASE ---
+        if not has_correct_answer:
+            quiz_answers = quiz.answer.split("|")
+            user_answer_pattern = process_user_input(answer, False, True)
+
+            # ✅ Check if user already tried same incorrect main answer before
+            all_previous = session.query(Answer).filter_by(
+                user_id=user.id,
+                quiz_id=quiz.id,
+                is_bonus_point=False,
+                is_correct=False
+            ).all()
+            attempted_before = any(is_duplicate_attempt(prev.answer, answer) for prev in all_previous)
+            if attempted_before:
+                embed.add_field(
+                    name="Duplicate Attempt",
+                    value="⚠️ You've already tried that answer.",
+                    inline=True
+                )
+                view = PostResultView(embed, interaction.user)
+                await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+                return
+
+            # --- Correctness Check ---
+            is_correct = any(
+                re.search(user_answer_pattern, a.strip(), re.IGNORECASE)
+                for a in quiz_answers
+            )
+
+            similarities = [
+                SequenceMatcher(None, answer.lower(), a.lower().strip()).ratio()
+                for a in quiz_answers
+            ]
+            similarity_percentage = round(max(similarities) * 100, 2) if similarities else 0
+
+            # --- Record Attempt ---
+            user_answer = Answer(
+                user_id=user.id,
+                quiz_id=quiz.id,
+                answer=answer.strip(),
+                answer_time=answer_duration_sec,
+                is_bonus_point=False,
+                is_correct=is_correct,
+            )
+
+            # Determine hint to show (if incorrect)
+            # Count prior incorrect attempts (non-bonus) BEFORE storing this attempt
+            prior_incorrect_count = session.query(Answer).filter(Answer.user_id == user.id, Answer.quiz_id == quiz.id, Answer.answer != "\\Bonus Answer\\", Answer.is_correct == False).count()
+            # prior_incorrect_count = 0 means this is the user's first incorrect attempt
+            hints_list = [h.strip() for h in (quiz.hints or "").split("|") if h.strip()]
+            hint_to_show = None
+            if not is_correct and prior_incorrect_count < len(hints_list):
+                # show nth hint: prior_incorrect_count -> hint index
+                hint_to_show = hints_list[prior_incorrect_count]
+
+            # Build embed message
+            if is_correct:
+                msg = f"✅ Correct in {answer_duration_sec}s!"
+                if quiz.bonus_answer:
+                    msg += f" (you can also try to get the bonus point using the same slash command)"
+                embed.add_field(name="Answer", value=msg, inline=True)
+                session.add(user_answer)
+                session.commit()
+                view = PostResultView(embed, interaction.user)
+                await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+                return
+            else:
+                # Incorrect: include similarity and hint if available
+                close_feedback = f" ({similarity_percentage}%)" if similarity_percentage >= 75 else ""
+                embed.add_field(name="Answer", value=f"❌ Incorrect in {answer_duration_sec}s{close_feedback}", inline=True)
+                if hint_to_show:
+                    embed.add_field(name=f"Hint #{prior_incorrect_count + 1}", value=hint_to_show, inline=False)
+
+                session.add(user_answer)
+                session.commit()
+
+                view = PostResultView(embed, interaction.user)
+                await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+                return
+
+        # --- BONUS ANSWER PHASE ---
+        elif quiz.bonus_answer and not has_correct_bonus:
+            quiz_bonus_answers = quiz.bonus_answer.split("|")
+            user_bonus_pattern = process_user_input(answer, False, True)
+
+            # ✅ Check if user already tried same incorrect bonus before
+            all_previous_bonus = session.query(Answer).filter_by(
+                user_id=user.id,
+                quiz_id=quiz.id,
+                is_bonus_point=False,
+                is_correct=False
+            ).all()
+
+            attempted_before_bonus = any(
+                is_duplicate_attempt(prev.bonus_answer or prev.answer, answer)
+                for prev in all_previous_bonus
+            )
+
+            if attempted_before_bonus:
+                embed.add_field(
+                    name="Duplicate Attempt",
+                    value="⚠️ You've already tried that answer.",
+                    inline=True
+                )
+
+                view = PostResultView(embed, interaction.user)
+                await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+                return
+
+            # --- Correctness Check ---
+            is_bonus_correct = any(
+                re.search(user_bonus_pattern, a.strip(), re.IGNORECASE)
+                for a in quiz_bonus_answers
+            )
+            similarities = [
+                SequenceMatcher(None, answer.lower(), a.lower().strip()).ratio()
+                for a in quiz_bonus_answers
+            ]
+            similarity_percentage = round(max(similarities) * 100, 2) if similarities else 0
+
+            # --- Record Bonus Attempt ---
+            bonus_entry = Answer(
+                user_id=user.id,
+                quiz_id=quiz.id,
+                answer="\\Bonus Answer\\",
+                bonus_answer=answer,
+                answer_time=answer_duration_sec,
+                is_correct=False,
+                is_bonus_point=is_bonus_correct,  # only True when correct
+            )
+
+            session.add(bonus_entry)
+            session.commit()
+
+            # --- Feedback ---
+            if is_bonus_correct:
+                embed.add_field(
+                    name="Bonus Answer",
+                    value=f"✅ Correct bonus in {answer_duration_sec}s!",
+                    inline=True,
+                )
+            else:
+                close_feedback = f" ({similarity_percentage}%)" if similarity_percentage >= 75 else ""
+                embed.add_field(
+                    name="Bonus Answer",
+                    value=f"❌ Incorrect bonus in {answer_duration_sec}s{close_feedback}",
+                    inline=True,
+                )
+
+            view = PostResultView(embed, interaction.user)
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+            return
+
+        # --- ALREADY DONE ---
+        else:
+            embed.add_field(
+                name="Already Completed",
+                value=f"You’ve already answered and claimed today’s {quiz_type_name} quiz and bonus.",
+                inline=True,
+            )
+            view = PostResultView(embed, interaction.user)
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+            return
+
+# --- Slash Commands for Each Quiz Type ---
+@bot.tree.command(name="male")
+@app_commands.describe(answer="Your answer to today's male seiyuu quiz")
+async def male(interaction: discord.Interaction, answer: str):
+    await answer_quiz_slash(interaction, "ms", answer)
+
+@bot.tree.command(name="female")
+@app_commands.describe(answer="Your answer to today's female seiyuu quiz")
+async def female(interaction: discord.Interaction, answer: str):
+    await answer_quiz_slash(interaction, "fs", answer)
+
+@bot.tree.command(name="maleimage")
+@app_commands.describe(answer="Your answer to today's male image quiz")
+async def maleimage(interaction: discord.Interaction, answer: str):
+    await answer_quiz_slash(interaction, "mi", answer)
+
+@bot.tree.command(name="femaleimage")
+@app_commands.describe(answer="Your answer to today's female image quiz")
+async def femaleimage(interaction: discord.Interaction, answer: str):
+    await answer_quiz_slash(interaction, "fi", answer)
+
+@bot.tree.command(name="songdle")
+@app_commands.describe(answer="Your answer to today's song quiz")
+async def song(interaction: discord.Interaction, answer: str):
+    await answer_quiz_slash(interaction, "song", answer)
 
 # --- Answering seiyuu --- #
-
-
 @bot.command(name="male", aliases=["m"])
 async def male_answer_quiz(
     ctx: commands.Context,
@@ -524,11 +877,40 @@ async def answer_quiz_type(
             input_str=answer, partial_match=False, swap_words=True
         )
 
-        # If the pattern matches: the answer is correct
-        quiz_answers = quiz_answer.split("|")
-        if any(re.search(user_answer_pattern, a.strip(), re.IGNORECASE) for a in quiz_answers):
+        # --- DUPLICATE CHECK LOGIC (same as slash) ---
+        previous_incorrect = session.query(Answer).filter_by(
+            user_id=user.id,
+            quiz_id=quiz.id,
+            is_bonus_point=False,
+            is_correct=False,
+        ).all()
 
-            # if they don't have a bonus point yet
+        attempted_before = any(is_duplicate_attempt(prev.answer, answer) for prev in previous_incorrect)
+
+        if attempted_before:
+            embed.add_field(
+                name="Duplicate Attempt",
+                value="⚠️ You've already tried that answer.",
+                inline=True
+            )
+            await ctx.send(embed=embed)
+            return
+
+        # Check if correct
+        quiz_answers = quiz_answer.split("|")
+        is_correct = any(
+            re.search(user_answer_pattern, a.strip(), re.IGNORECASE) for a in quiz_answers
+        )
+
+        # Always compute similarity (for incorrect answers too)
+        similarities = [
+            SequenceMatcher(None, answer.lower(), a.lower().strip()).ratio()
+            for a in quiz_answers
+        ]
+        similarity_percentage = round(max(similarities) * 100, 2) if similarities else 0
+
+        if is_correct:
+            # ✅ Correct answer
             if not has_correct_bonus and quiz.bonus_answer:
                 bonus_point_feedback = f" (you can also try to get the bonus point using `!{quiz_type_name.lower().replace(' ', '')}bonus ||your answer||`)"
             else:
@@ -553,9 +935,14 @@ async def answer_quiz_type(
 
         # Otherwise, the pattern doesn't match: the answer is incorrect
         else:
+            # ❌ Wrong answer
+            close_feedback = ""
+            if similarity_percentage >= 75:
+                close_feedback = f" ({similarity_percentage}%)"
+
             embed.add_field(
                 name="Answer",
-                value="❌ Incorrect!",
+                value=f"❌ Incorrect in {answer_time}s {close_feedback}",
                 inline=True,
             )
 
@@ -865,7 +1252,43 @@ async def answer_bonus_quiz(
         )
 
         quiz_bonus_answers = quiz_bonus_answer.split("|")
-        if any(re.search(user_bonus_answer_pattern, a.strip(), re.IGNORECASE) for a in quiz_bonus_answers):
+
+        # Check if correct
+        is_correct_bonus = any(
+            re.search(user_bonus_answer_pattern, a.strip(), re.IGNORECASE)
+            for a in quiz_bonus_answers
+        )
+
+        # --- DUPLICATE CHECK FOR BONUS ANSWERS ---
+        previous_bonus_incorrect = session.query(Answer).filter_by(
+            user_id=user.id,
+            quiz_id=quiz.id,
+            is_bonus_point=False,   # bonus answers stored as main answer = "\Bonus Answer\"
+            is_correct=False,
+        ).all()
+
+        attempted_before_bonus = any(
+            is_duplicate_attempt(prev.bonus_answer or prev.answer, answer)
+            for prev in previous_bonus_incorrect
+        )
+
+        if attempted_before_bonus:
+            embed.add_field(
+                name="Duplicate Attempt",
+                value="⚠️ You've already tried that bonus answer.",
+                inline=True
+            )
+            await ctx.send(embed=embed)
+            return
+
+        # Always compute similarity (for incorrect answers too)
+        similarities = [
+            SequenceMatcher(None, answer.lower(), a.lower().strip()).ratio()
+            for a in quiz_bonus_answers
+        ]
+        similarity_percentage = round(max(similarities) * 100, 2) if similarities else 0
+
+        if is_correct_bonus:
             new_answer.is_bonus_point = True
             session.add(new_answer)
             session.commit()
@@ -880,9 +1303,13 @@ async def answer_bonus_quiz(
             session.add(new_answer)
             session.commit()
 
+            close_feedback = ""
+            if similarity_percentage >= 75:
+                close_feedback = f" ({similarity_percentage}%)"
+
             embed.add_field(
                 name="Bonus Answer",
-                value="❌ Incorrect! Better luck next time. :disappointed_relieved:",
+                value=f"❌ Incorrect in {answer_duration_sec}s {close_feedback}",
                 inline=True,
             )
 
@@ -972,11 +1399,14 @@ async def generate_stats_embed_content(
         Filled embed.
     """
 
+    # cache for global ranks per quiz id to avoid repeated DB queries
+    quiz_global_rank_cache: dict[int, dict[int, int]] = {}  # quiz_id -> {user_id: rank}
     current_quiz_date = get_current_quiz_date(daily_quiz_reset_time)
 
     with session as session:
         # Get the answers for this type
 
+        # Get the answers / quizzes for this type(s)
         played_quizzes = (
             session.query(Quiz)
             .join(UserStartQuizTimestamp)
@@ -1066,7 +1496,7 @@ async def generate_stats_embed_content(
         embed.add_field(name="", value="", inline=False)
 
         # Fastest Guesses for this user
-        fastest_answers = (
+        fastest_answers_db = (
             session.query(Answer)
             .join(Quiz)
             .filter(
@@ -1083,7 +1513,7 @@ async def generate_stats_embed_content(
         medals = [":first_place:", ":second_place:", ":third_place:"]
 
         nb_attempts = []
-        for fastest_answer in fastest_answers:
+        for fastest_answer in fastest_answers_db:
             nb_attempts.append(
                 session.query(Answer)
                 .filter(
@@ -1094,18 +1524,74 @@ async def generate_stats_embed_content(
                 .count()
             )
 
-        fastest_answers = "\n\n".join(
-            [
-                f"{medals[i]} | **{answer.answer_time}s** - {answer.answer} in {nb_attempts[i]} attempts on {answer.quiz.date}"
-                for i, answer in enumerate(fastest_answers)
-            ]
-        )
+        fastest_answers_lines = []
+        for i, answer in enumerate(fastest_answers_db):
+            rank = f"{medals[i]} " if i < 3 else f"#{i + 1} |"
 
-    embed.add_field(
-        name="__Fastest Guesses__",
-        value=fastest_answers,
-        inline=True,
-    )
+            # Split and clean all aliases
+            all_answers = [a.strip() for a in answer.quiz.answer.split("|") if a.strip()]
+            main_character = all_answers[0] if len(all_answers) > 0 else "?"
+            main_seiyuu = all_answers[1] if len(all_answers) > 1 else None
+
+            # Normalize for matching
+            user_guess = answer.answer.strip()
+            matched_alias = None
+            for alias in all_answers:
+                pattern = process_user_input(alias, partial_match=False, swap_words=True)
+                if re.fullmatch(pattern, user_guess, re.IGNORECASE):
+                    matched_alias = alias
+                    break
+
+            # Formatting display (bold only what user guessed)
+            if matched_alias:
+                if matched_alias.lower() == main_character.lower():
+                    display_text = f"**{main_character}**" if not main_seiyuu else f"**{main_character}** / {main_seiyuu}"
+                elif main_seiyuu and matched_alias.lower() == main_seiyuu.lower():
+                    display_text = f"{main_character} / **{main_seiyuu}**"
+                elif main_seiyuu:
+                    display_text = f"{main_character} / {main_seiyuu} (**{matched_alias}**)"
+                else:
+                    display_text = f"{main_character} (**{matched_alias}**)"
+            else:
+                display_text = f"{main_character}" if not main_seiyuu else f"{main_character} / {main_seiyuu}"
+
+
+            # GLOBAL RANK calculation (cached per quiz_id)
+            quiz_id = answer.quiz_id
+            if quiz_id not in quiz_global_rank_cache:
+                corrects_for_quiz = (
+                    session.query(Answer)
+                    .filter(Answer.quiz_id == quiz_id, Answer.is_correct == True)
+                    .order_by(Answer.answer_time.asc())
+                    .all()
+                )
+                rank_map: dict[int, int] = {}
+                for idx, a in enumerate(corrects_for_quiz):
+                    # first occurrence of user_id -> global rank
+                    if a.user_id not in rank_map:
+                        rank_map[a.user_id] = idx + 1
+                quiz_global_rank_cache[quiz_id] = rank_map
+
+            user_global_rank = quiz_global_rank_cache[quiz_id].get(answer.user_id)
+            if user_global_rank == 1:
+                global_display = "**Top 🥇**"
+            elif user_global_rank == 2:
+                global_display = "**Top 🥈**"
+            elif user_global_rank == 3:
+                global_display = "**Top 🥉**"
+            elif user_global_rank is not None:
+                global_display = f"**Top #{user_global_rank}**"
+            else:
+                global_display = "**Top —**"
+
+            line = (
+                f"{rank} **{answer.answer_time:.3f}s** - {display_text}\n"
+                f"> {global_display} in {nb_attempts[i]} attempt(s) / {answer.quiz.date}"
+            )
+            fastest_answers_lines.append(line)
+
+        fastest_answers_str = "\n\n".join(fastest_answers_lines)
+        embed.add_field(name="__Fastest Guesses__", value=fastest_answers_str or "> No fastest guesses yet", inline=True)
 
     return embed
 
@@ -1409,6 +1895,10 @@ async def generate_guesses_embed_content(
 
     current_quiz_date = get_current_quiz_date(daily_quiz_reset_time)
 
+    # cache to avoid repeated DB queries per quiz
+    quiz_global_rank_cache: dict[int, dict[int, int]] = {}  # quiz_id -> {user_id: rank}
+
+
     with session as session:
         # Get the answers for this type
 
@@ -1479,154 +1969,224 @@ async def generate_guesses_embed_content(
             for i, answer in enumerate(
                 fastest_answers[page_start:page_end], start=page_start
             ):
-                rank = f"{medals[i % 3]} " if i < 3 else f"#{i + 1} "
-                value = f"{rank} | **{answer.answer_time}s** - **{answer.answer}** in {nb_attempts[i]} attempt(s) / {answer.quiz.date}"
-                embed.add_field(name=f"", value=value, inline=False)
+                personal_rank = f"{medals[i % 3]} " if i < 3 else f"#{i + 1} |"
+
+                # Split and clean all aliases (remove empty strings and extra spaces)
+                all_answers = [a.strip() for a in answer.quiz.answer.split("|") if a.strip()]
+
+                # Determine main names (first two if available)
+                main_character = all_answers[0] if len(all_answers) > 0 else "?"
+                main_seiyuu = all_answers[1] if len(all_answers) > 1 else None
+
+                # Normalize everything for comparison
+                user_guess = answer.answer.strip()
+                all_lower = [a.lower() for a in all_answers]
+
+                # Find matched alias
+                matched_alias = None
+                for alias in all_answers:
+                    pattern = process_user_input(alias, partial_match=False, swap_words=True)
+                    if re.fullmatch(pattern, user_guess, re.IGNORECASE):
+                        matched_alias = alias
+                        break
+
+                # Formatting display (bold only the guessed alias)
+                if matched_alias:
+                    if matched_alias.lower() == main_character.lower():
+                        display_text = f"**{main_character}**" if not main_seiyuu else f"**{main_character}** / {main_seiyuu}"
+                    elif main_seiyuu and matched_alias.lower() == main_seiyuu.lower():
+                        display_text = f"{main_character} / **{main_seiyuu}**"
+                    elif main_seiyuu:
+                        # Matched a later alias → show in parentheses
+                        display_text = f"{main_character} / {main_seiyuu} (**{matched_alias}**)"
+                    else:
+                        display_text = f"{main_character} (**{matched_alias}**)"
+                else:
+                    display_text = f"{main_character}" if not main_seiyuu else f"{main_character} / {main_seiyuu}"
+
+                # ---------- GLOBAL RANK (cache per quiz) ----------
+                quiz_id = answer.quiz_id
+                if quiz_id not in quiz_global_rank_cache:
+                    # load all correct answers for that quiz ordered by time
+                    corrects = (
+                        session.query(Answer)
+                        .filter(Answer.quiz_id == quiz_id, Answer.is_correct == True)
+                        .order_by(Answer.answer_time.asc())
+                        .all()
+                    )
+                    rank_map = {}
+                    for idx, a in enumerate(corrects):
+                        # if multiple answers by same user, keep earliest occurrence (first appearance)
+                        if a.user_id not in rank_map:
+                            rank_map[a.user_id] = idx + 1
+                    quiz_global_rank_cache[quiz_id] = rank_map
+
+                user_global_rank = quiz_global_rank_cache[quiz_id].get(answer.user_id)
+
+                # pretty global display (podium emojis for 1-3)
+                if user_global_rank == 1:
+                    global_display = "**Top 🥇**"
+                elif user_global_rank == 2:
+                    global_display = "**Top 🥈**"
+                elif user_global_rank == 3:
+                    global_display = "**Top 🥉**"
+                elif user_global_rank is not None:
+                    global_display = f"**Top #{user_global_rank}**"
+                else:
+                    global_display = "**Top —**"
+
+                # Build final value: personal rank (left), time, guessed display, then attempts/date + global rank after date
+                value = (
+                    f"{personal_rank} **{answer.answer_time:.3f}s** - {display_text}\n"
+                    f"> {global_display} in {nb_attempts[i]} attempt(s) / {answer.quiz.date}"
+                )
+
+                embed.add_field(name="", value=value, inline=False)
+
             mgpages.append(embed)
 
+    return mgpages
 
-@bot.command(name="topspeed", aliases=["tops"])
-# Add other decorators as needed
-async def topspeed(ctx: commands.Context):
-    """
-    Display the top speed guesses.
-
-    Examples
-    ---------
-    !topspeed
-    !tops
-    """
-
+@bot.tree.command(name="ct")
+async def current_top(interaction: discord.Interaction):
+    """Show today's fastest correct answers for quizzes you've opened or created, with user attempt counts."""
     with bot.session as session:
-        answers = session.query(Answer).all()
-        medals = [":first_place:", ":second_place:", ":third_place:"]
-
-        if not answers:
-            await ctx.send(f"No valid answers found.")
-            return
-
-        # Get the fastest answers for this quiz type
-        current_quiz_date = get_current_quiz_date(DAILY_QUIZ_RESET_TIME)
-        fastest_answers = (
-            session.query(Answer)
-            .join(Quiz)
-            .filter(
-                Answer.is_correct,
-                Quiz.date < current_quiz_date,
-                Answer.answer != "\\Bonus Answer\\",
-            )
-            .order_by(Answer.answer_time)
-            .all()
-        )
-
-    toppages = []
-    for page_start in range(0, len(fastest_answers), 20):
-        embed = discord.Embed(title="Top Speed Guesses")
-
-        page_end = min(page_start + 20, len(fastest_answers))
-
-        for i, answer in enumerate(
-            fastest_answers[page_start:page_end], start=page_start
-        ):
-            rank = f"{medals[i % 3]} " if i < 3 else f"#{i + 1} "
-            value = f"{rank} | **{answer.answer_time}s** - {answer.answer} by <@{answer.user_id}>"
-            embed.add_field(name=f"", value=value, inline=False)
-        toppages.append(embed)
-
-    session = EmbedPaginatorSession(ctx, *toppages)
-    await session.run()
-
-
-@bot.command(name="currenttop", aliases=["ct"])
-async def current_top(ctx: commands.Context):
-    """
-    Displays today's Top Guesses.
-
-    Examples
-    ---------
-    !currenttop
-    !ct
-    """
-    with bot.session as session:
-        # Get the fastest answers for today's quiz and onwards
         current_quiz_date = get_current_quiz_date(DAILY_QUIZ_RESET_TIME)
         tomorrow_reset_date = current_quiz_date + timedelta(days=1)
 
-        # Explicitly define the join conditions
+        # --- Get opened quizzes
+        opened_quiz_ids = [
+            qid for (qid,) in session.query(UserStartQuizTimestamp.quiz_id)
+            .filter(UserStartQuizTimestamp.user_id == interaction.user.id)
+            .all()
+        ]
+
+        # --- Get created quizzes
+        created_quiz_ids = [
+            qid for (qid,) in session.query(Quiz.id)
+            .filter(
+                Quiz.creator_id == interaction.user.id,
+                Quiz.date >= current_quiz_date,
+                Quiz.date < tomorrow_reset_date,
+            )
+            .all()
+        ]
+
+        # --- Combine both
+        all_relevant_quiz_ids = list(set(opened_quiz_ids + created_quiz_ids))
+
+        if not all_relevant_quiz_ids:
+            await interaction.response.send_message(
+                "You haven't opened or created any quizzes today.",
+                ephemeral=True,
+            )
+            return
+
+        # --- Get fastest correct answers
         fastest_answers = (
-            session.query(Answer, QuizType)
+            session.query(Answer, QuizType, Quiz)
             .join(Quiz, Answer.quiz_id == Quiz.id)
             .join(QuizType, Quiz.id_type == QuizType.id)
             .filter(
                 Answer.is_correct,
                 Quiz.date >= current_quiz_date,
                 Quiz.date < tomorrow_reset_date,
+                Quiz.id.in_(all_relevant_quiz_ids),
                 Answer.answer != "\\Bonus Answer\\",
             )
             .order_by(QuizType.id, Answer.answer_time)
             .all()
         )
 
-        if not fastest_answers:
-            await ctx.send(f"No valid answers found.")
-            return
-
-        pages = []
-
-        # Initialize quiz_types to group answers by their type, and keep the order based on QuizType.id
-        quiz_types = OrderedDict()
+        quiz_types = session.query(QuizType).all()
         medals = [":first_place:", ":second_place:", ":third_place:"]
 
-        # Group answers by quiz type
-        for answer, quiz_type in fastest_answers:
-            if quiz_type.type not in quiz_types:
-                quiz_types[quiz_type.type] = []
-            quiz_types[quiz_type.type].append(
+        # --- Group by quiz type
+        results_by_type = {qt.type: [] for qt in quiz_types}
+        for answer, quiz_type, quiz in fastest_answers:
+            results_by_type[quiz_type.type].append(
                 (answer.user.id, answer.answer_time, quiz_type.emoji)
             )
 
-        # Convert quiz_types dict into a list of tuples so we can chunk it
-        quiz_type_items = list(quiz_types.items())
-
-        # Helper function to chunk quiz types into groups of 2
+        # --- Helper for chunking into pairs
         def chunked(iterable, size):
             it = iter(iterable)
             return iter(lambda: tuple(islice(it, size)), ())
 
-        # Iterate over the quiz type chunks
-        for quiz_type_chunk in chunked(quiz_type_items, 2):
+        # --- Convert quiz_types into a list so we can chunk them
+        quiz_type_items = list(quiz_types)
+
+        embeds = []
+
+        # --- Loop through quiz types in groups of 3 (side by side)
+        for quiz_chunk in chunked(quiz_type_items, 3):
             embed = discord.Embed(
                 title="Today's Top Guesses",
-                description="Fastest answers by type",
-                color=0x2F3136,
+                description="Fastest correct answers from today",
+                color=0xBBE6F3,
+            )
+            embed.set_author(
+                name=interaction.user.name,
+                icon_url=interaction.user.avatar.url,
             )
 
-            # Add up to two fields (quiz types) to each embed
-            for quiz_type, user_times in quiz_type_chunk:
-                user_times = sorted(user_times, key=lambda x: x[1])
-
+            for quiz_type in quiz_chunk:
+                user_times = results_by_type[quiz_type.type]
                 value = ""
-                for i, (user_id, time, emoji) in enumerate(user_times[:10]):
-                    rank = f"{medals[i]} " if i < 3 else f"#{i + 1}: "
-                    value += f"> {rank} <@{user_id}> - **{time:.2f}s**\n"
 
-                # Add a field for this quiz type
-                emoji = user_times[0][2] if user_times else ""
+                # --- 🆕 Get total attempts for this quiz type
+                total_attempts_type = (
+                    session.query(Answer)
+                    .join(Quiz, Answer.quiz_id == Quiz.id)
+                    .filter(
+                        Quiz.date >= current_quiz_date,
+                        Quiz.date < tomorrow_reset_date,
+                        Quiz.id_type == quiz_type.id,
+                        Quiz.id.in_(all_relevant_quiz_ids),
+                        Answer.answer != "\\Bonus Answer\\",
+                    )
+                    .count()
+                )
+
+                if user_times:
+                    user_times.sort(key=lambda x: x[1])
+                    for j, (user_id, time, emoji) in enumerate(user_times[:10]):
+                        rank = f"{medals[j]} " if j < 3 else f"#{j + 1}: "
+
+                        # Count only non-bonus attempts by that user
+                        total_attempts_user = (
+                            session.query(Answer)
+                            .join(Quiz, Answer.quiz_id == Quiz.id)
+                            .filter(
+                                Quiz.date >= current_quiz_date,
+                                Quiz.date < tomorrow_reset_date,
+                                Quiz.id_type == quiz_type.id,
+                                Quiz.id.in_(all_relevant_quiz_ids),
+                                Answer.user_id == user_id,
+                                Answer.answer != "\\Bonus Answer\\",
+                            )
+                            .count()
+                        )
+
+                        value += (
+                            f"> {rank} <@{user_id}> - **{time:.2f}s** "
+                            f"({total_attempts_user} attempts)\n"
+                        )
+                else:
+                    value = "> Unopened / No Hitters ⚠️"
+
+                # --- 🆕 Include total attempts in field name
                 embed.add_field(
-                    name=f"> {emoji} {quiz_type}",
-                    value=value or "No data.",
+                    name=f"> {quiz_type.emoji} {quiz_type.type} | Total Attempts: {total_attempts_type}",
+                    value=value,
                     inline=True,
                 )
 
             embed.add_field(name="", value="", inline=False)
+            embeds.append(embed)
 
-            # Append this embed to the pages list
-            pages.append(embed)
-
-        # Start pagination session
-        session = EmbedPaginatorSession(ctx, *pages)
-        await session.run()
-
+        paginator = EmbedPaginatorSession(interaction, *embeds, timeout=120)
+        await paginator.run(ephemeral=True)
 
 @bot.command(name="seiyuuleaderboard", aliases=["slb"])
 # Add other decorators as needed
@@ -1926,22 +2486,20 @@ async def history(interaction: discord.Interaction):
 
         quiz_types = session.query(QuizType).all()
 
-        embed = discord.Embed(
-            title="Today's History",
-            color=0xBBE6F3,
-        )
+        # Helper for chunking a list
+        def chunked(iterable, size):
+            it = iter(iterable)
+            return iter(lambda: tuple(islice(it, size)), ())
 
-        embed.set_author(
-            name=interaction.user.name,
-            icon_url=interaction.user.avatar.url,
-        )
+        pages = []
+        lines_per_page = 20  # ~20 lines max per embed
 
+        all_lines = []
+        header = f"Today's History for {interaction.user.name}\n\n"
+
+        # Collect all lines of text before paginating
         for quiz_type in quiz_types:
-            embed.add_field(
-                name=f"> {quiz_type.emoji} {quiz_type.type}",
-                value="",
-                inline=False,
-            )
+            all_lines.append(f"__**{quiz_type.emoji} {quiz_type.type}**__")
 
             # get the answers list for this user and this quiz type
             answers = (
@@ -1957,39 +2515,50 @@ async def history(interaction: discord.Interaction):
 
             # if the user hasn't answered yet
             if not answers:
-                embed.add_field(
-                    name="",
-                    value=f"You haven't answered today's {quiz_type.type} quiz yet.",
-                    inline=True,
-                )
+                all_lines.append(f"> You haven't answered today's {quiz_type.type} quiz yet.\n")
+                continue
 
-            value = ""
             for answer in answers:
                 if answer.answer != "\\Bonus Answer\\":
-                    if answer.is_correct:
-                        value += f"> ✅ {answer.answer} in {answer.answer_time}s\n"
-                    else:
-                        value += f"> ❌ {answer.answer} in {answer.answer_time}s\n"
+                    mark = "✅" if answer.is_correct else "❌"
+                    all_lines.append(f"> {mark} {answer.answer} in {answer.answer_time}s")
                 else:
-                    if answer.is_bonus_point:
-                        value += (
-                            f"> ✅ {answer.bonus_answer} in {answer.answer_time}s\n"
-                        )
-                    else:
-                        value += (
-                            f"> ❌ {answer.bonus_answer} in {answer.answer_time}s\n"
-                        )
+                    mark = "✅" if answer.is_bonus_point else "❌"
+                    all_lines.append(f"> {mark} {answer.bonus_answer} in {answer.answer_time}s")
 
-            embed.add_field(
-                name="",
-                value=value,
-                inline=True,
+            all_lines.append("")  # blank line between types
+
+        # Split all_lines into pages of ~20 lines
+        for chunk in chunked(all_lines, lines_per_page):
+            page_text = "\n".join(chunk)
+            embed = discord.Embed(
+                title="Today's History",
+                description=page_text,
+                color=0xBBE6F3,
             )
+            embed.set_author(
+                name=interaction.user.name,
+                icon_url=interaction.user.avatar.url,
+            )
+            pages.append(embed)
 
-            embed.add_field(name="", value="", inline=False)
+    # Handle empty case
+    if not pages:
+        await interaction.response.send_message(
+            "You haven’t answered any quizzes today.",
+            ephemeral=True,
+        )
+        return
 
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    # If only one page, send it directly
+    if len(pages) == 1:
+        await interaction.response.send_message(embed=pages[0], ephemeral=True)
+        return
 
+    # If multiple pages, use the paginator (same style as /ct)
+    session = EmbedPaginatorSession(interaction, *pages, disable_stop=True)
+
+    await session.run(ephemeral=True)
 
 @bot.event
 async def post_yesterdays_quiz_results():
@@ -2342,7 +2911,7 @@ class NewQuizButton(discord.ui.Button):
             if self.quiz_type.type in [
                 "Male Image",
                 "Female Image",
-            ] and current_quiz.clip.endswith((".png", ".jpg", ".jpeg", ".gif")):
+            ] and current_quiz.clip.endswith((".png", ".jpg", ".jpeg", ".gif", ".avif", ".webp")):
                 embed.add_field(
                     name="",
                     value=current_quiz.clip,
@@ -2522,6 +3091,7 @@ async def postquizbuttons(ctx):
     new_clip="input new clip",
     new_answer="input new seiyuu",
     new_bonus_answer="The bonus character answer for the quiz",
+    hints="Optional hints separated by | (hint1|hint2|hint3)"
 )
 async def new_quiz(
     interaction: discord.Interaction,
@@ -2529,6 +3099,7 @@ async def new_quiz(
     new_clip: str,
     new_answer: str,
     new_bonus_answer: Optional[str] = None,
+    hints: Optional[str] = None,
 ):
     """**Bot Admin Only** - create a new quiz."""
 
@@ -2569,6 +3140,7 @@ async def new_quiz(
             clip=new_clip,
             answer=new_answer,
             bonus_answer=new_bonus_answer,
+            hints=hints,
             id_type=quiz_type.value,
             date=new_date,
         )
@@ -2584,9 +3156,10 @@ async def new_quiz(
 @app_commands.choices(quiz_type=get_quiz_type_choices(session=bot.session))
 @app_commands.describe(
     quiz_type="type of the quiz to submit",
-    clip="mp3 clip",
-    answer="correct mp3 answer ",
-    bonus_answer="The bonus character answer for the submission",
+    clip="image / audio link",
+    answer="correct answer ",
+    bonus_answer="The bonus answer for the submission",
+    hints="Hints, separated by | (hint1|hint2|hint3)",
 )
 async def send_submission(
     interaction: discord.Interaction,
@@ -2594,6 +3167,7 @@ async def send_submission(
     clip: str,
     answer: str,
     bonus_answer: Optional[str] = None,
+    hints: Optional[str] = None,
 ):
     # Get the server and channel IDs for the current interaction
     server_id = interaction.guild.id
@@ -2660,78 +3234,116 @@ async def send_submission(
             clip=clip,
             answer=answer,
             bonus_answer=bonus_answer,
+            hints=hints,
             id_type=quiz_type.value,
             date=new_date,
         )
         session.add(new_quiz)
         session.commit()
-    await interaction.response.send_message("✅")
+    await interaction.response.send_message("✅", ephemeral=True)
     # Send the result as a direct message to the user
     await interaction.user.send(
-        f"Submission for {quiz_type.name} added for {new_date}\n ||[{answer}]({clip})|| {'+ ||' + bonus_answer if bonus_answer else ''}||"
+        f"Submission for {quiz_type.name} added for {new_date}\n ||[{answer}]({clip})|| {'+ ||' + bonus_answer if bonus_answer else ''}|| {'+ ||' + hints if hints else ''}||"
     )
 
 
 @bot.tree.command(name="plannedquizzes")
 async def planned_quizzes(interaction: discord.Interaction):
-    """**Bot Admin Only** - Check the planned quizzes."""
+    """**Bot Admin Only** - Check the planned quizzes you've already opened or created."""
+
+    await interaction.response.defer()  # allow pagination later
 
     with bot.session as session:
+        # check admin
         if not is_bot_admin(session=session, user=interaction.user):
-            await interaction.response.send_message(
-                "You are not an admin, you can't use this command."
+            await interaction.followup.send(
+                "You are not an admin, you can't use this command.",
+                ephemeral=True
             )
             return
 
-        current_quiz_date = get_current_quiz_date(
-            daily_quiz_reset_time=DAILY_QUIZ_RESET_TIME
-        )
+        current_quiz_date = get_current_quiz_date(DAILY_QUIZ_RESET_TIME)
 
-        # get all the quizzes that are planned after the current quiz
+        # ---- (1) quizzes you've opened
+        opened_quiz_ids = [
+            qid for (qid,) in session.query(UserStartQuizTimestamp.quiz_id)
+            .filter(UserStartQuizTimestamp.user_id == interaction.user.id)
+            .all()
+        ]
+
+        # ---- (2) quizzes you've created
+        created_quiz_ids = [
+            qid for (qid,) in session.query(Quiz.id)
+            .filter(
+                Quiz.creator_id == interaction.user.id,
+                Quiz.date >= current_quiz_date,
+            )
+            .all()
+        ]
+
+        # ---- (3) combine
+        visible_quiz_ids = list(set(opened_quiz_ids + created_quiz_ids))
+
+        if not visible_quiz_ids:
+            await interaction.followup.send(
+                f"You haven’t opened or created any planned quizzes after {current_quiz_date}.",
+                ephemeral=True,
+            )
+            return
+
+        # ---- (4) Get unique dates for those quizzes
         unique_date = (
             session.query(Quiz.date)
-            .filter(Quiz.date >= current_quiz_date)
+            .filter(
+                Quiz.id.in_(visible_quiz_ids),
+                Quiz.date >= current_quiz_date,
+            )
             .distinct()
+            .order_by(Quiz.date)
             .all()
         )
 
-        if not unique_date:
-            await interaction.response.send_message(
-                f"No planned quizzes after {current_quiz_date}."
-            )
-            return
-
-        embed = discord.Embed(title="Planned Quizzes")
-
-        # get all the quiz types
         quiz_types = session.query(QuizType).all()
+        pages = []
 
-        for i, quiz_date in enumerate(unique_date):
-            quiz_date = quiz_date[0]
+        # ---- Create one embed per date (pagination)
+        for date_row in unique_date:
+            quiz_date = date_row[0]
 
+            embed = discord.Embed(
+                title="Planned Quizzes You’ve Opened / Created",
+                color=discord.Color.blurple()
+            )
+
+            day_label = "Today" if quiz_date == current_quiz_date else str(quiz_date)
             embed.add_field(
-                name=f":calendar_spiral: __**{quiz_date if i != 0 else 'Today'}**__",
+                name=f":calendar_spiral: __**{day_label}**__",
                 value="",
                 inline=False,
             )
 
-            for i, quiz_type in enumerate(quiz_types):
-                # get quiz for this type and date
+            # list quiz types
+            for j, quiz_type in enumerate(quiz_types):
+
                 quiz = (
                     session.query(Quiz)
                     .filter(
                         Quiz.id_type == quiz_type.id,
                         Quiz.date == quiz_date,
-                        Quiz.creator_id,
+                        Quiz.id.in_(visible_quiz_ids),
                     )
                     .first()
                 )
 
                 if quiz:
-                    creator_id = quiz.creator_id
-                    value = f"||[{quiz.answer}]({quiz.clip})||{' + ||' + quiz.bonus_answer if quiz.bonus_answer else ''}|| by <@{creator_id}>"
+                    value = f"Answer: ||[{quiz.answer}]({quiz.clip})||\n"
+                    if quiz.bonus_answer:
+                        value += f"> Bonus: ||{quiz.bonus_answer}||\n"
+                        if quiz.hints:
+                            value += f"> Hints: ||{quiz.hints}||\n"
+                    value += f"> Planned by <@{quiz.creator_id}>"
                 else:
-                    value = "Nothing planned :disappointed_relieved:"
+                    value = "Unopened / Not Yours"
 
                 embed.add_field(
                     name=f"> {quiz_type.emoji} {quiz_type.type}",
@@ -2739,56 +3351,80 @@ async def planned_quizzes(interaction: discord.Interaction):
                     inline=True,
                 )
 
-                # Linebreak every two types unless last type
-                if (i + 1) % 2 == 0 and i != 0 and i + 1 != len(quiz_types):
+                if (j + 1) % 2 == 0 and j + 1 != len(quiz_types):
                     embed.add_field(name="", value="", inline=False)
 
-            # Linebreak unless last date
-            if quiz_date != unique_date[-1][0]:
-                embed.add_field(name="\u200b", value="", inline=False)
+            pages.append(embed)
 
-        await interaction.response.send_message(embed=embed)
+        # ---- FakeContext so paginator uses followup instead of response
+        class FakeContext:
+            def __init__(self, interaction):
+                self.interaction = interaction
+                self.author = interaction.user
+                self.channel = interaction.channel
 
+            async def send(self, *args, **kwargs):
+                view = kwargs.pop("view", None)
+                ephemeral = kwargs.pop("ephemeral", None)
+
+                follow = kwargs.copy()
+                if view is not None:
+                    follow["view"] = view
+                if ephemeral is not None:
+                    follow["ephemeral"] = ephemeral
+
+                return await self.interaction.followup.send(*args, **follow)
+
+            async def fetch_message(self, mid):
+                return await self.interaction.channel.fetch_message(mid)
+
+        ctx = FakeContext(interaction)
+
+        paginator = EmbedPaginatorSession(ctx, *pages, timeout=120)
+        await paginator.run(ephemeral=False)
 
 @bot.tree.command(name="queue")
 async def queue(interaction: discord.Interaction):
     """Check the planned quizzes."""
 
-    with bot.session as session:
-        current_quiz_date = get_current_quiz_date(
-            daily_quiz_reset_time=DAILY_QUIZ_RESET_TIME
-        )
+    await interaction.response.defer()  # defer reply so you can edit later
 
-        # get all the quizzes that are planned after the current quiz
+    with bot.session as session:
+        current_quiz_date = get_current_quiz_date(DAILY_QUIZ_RESET_TIME)
+
         unique_date = (
             session.query(Quiz.date)
             .filter(Quiz.date >= current_quiz_date)
             .distinct()
+            .order_by(Quiz.date)
             .all()
         )
 
         if not unique_date:
-            await interaction.response.send_message(
-                f"No planned quizzes after {current_quiz_date}."
+            await interaction.followup.send(
+                f"No planned quizzes after {current_quiz_date}.", ephemeral=True
             )
             return
 
-        embed = discord.Embed(title="Planned Quizzes")
-
-        # get all the quiz types
         quiz_types = session.query(QuizType).all()
+        pages = []
 
-        for i, quiz_date in enumerate(unique_date):
-            quiz_date = quiz_date[0]
+        for i, quiz_date_row in enumerate(unique_date):
+            quiz_date = quiz_date_row[0]
+            day_label = f"Today - {quiz_date.strftime('%Y-%m-%d')}" if i == 0 else str(quiz_date)
+
+            embed = discord.Embed(
+                title="Planned Quizzes",
+                color=0xBBE6F3,
+            )
 
             embed.add_field(
-                name=f":calendar_spiral: __**{quiz_date if i != 0 else 'Today'}**__",
+                name=f":calendar_spiral: __**{day_label}**__",
                 value="",
                 inline=False,
             )
 
-            for i, quiz_type in enumerate(quiz_types):
-                # get quiz for this type and date
+            for j, quiz_type in enumerate(quiz_types):
                 quiz = (
                     session.query(Quiz)
                     .filter(Quiz.id_type == quiz_type.id, Quiz.date == quiz_date)
@@ -2797,26 +3433,56 @@ async def queue(interaction: discord.Interaction):
 
                 if quiz:
                     creator_id = quiz.creator_id
-                    value = f"Queued by <@{creator_id}>"
+                    value = f"> Queued by <@{creator_id}>"
                 else:
-                    value = "Nothing planned :disappointed_relieved:"
+                    value = "> Unplanned"
 
                 embed.add_field(
                     name=f"> {quiz_type.emoji} {quiz_type.type}",
-                    value=f"> {value}",
+                    value=value,
                     inline=True,
                 )
 
-                # Linebreak every two types unless last type
-                if (i + 1) % 2 == 0 and i != 0 and i + 1 != len(quiz_types):
+                if (j + 1) % 2 == 0 and j + 1 != len(quiz_types):
                     embed.add_field(name="", value="", inline=False)
 
-            # Linebreak unless last date
-            if quiz_date != unique_date[-1][0]:
-                embed.add_field(name="\u200b", value="", inline=False)
+            pages.append(embed)
 
-        await interaction.response.send_message(embed=embed)
+# ---- Improved FakeContext wrapper for interactions ----
+        class FakeContext:
+            def __init__(self, interaction: discord.Interaction):
+                self.interaction = interaction
+                self.author = interaction.user
+                self.channel = interaction.channel
 
+            async def send(self, *args, **kwargs):
+                """
+                Map a ctx.send(...) call to interaction.followup.send(...)
+                but don't pass `view` if it's None (discord.py enforces view type).
+                Also pass ephemeral when provided.
+                """
+                # interaction.followup.send requires that 'view' be a View instance if provided.
+                # Many callers may pass view=None; drop it to avoid TypeError.
+                view = kwargs.pop("view", None)
+                # capture ephemeral if present
+                ephemeral = kwargs.pop("ephemeral", None)
+
+                followup_kwargs = kwargs.copy()
+                if view is not None:
+                    followup_kwargs["view"] = view
+                if ephemeral is not None:
+                    followup_kwargs["ephemeral"] = ephemeral
+
+                return await self.interaction.followup.send(*args, **followup_kwargs)
+
+            # Provide a minimal compatible interface if needed:
+            async def fetch_message(self, message_id):
+                return await self.interaction.channel.fetch_message(message_id)
+
+        # 2) create FakeContext and pass to paginator
+        ctx = FakeContext(interaction)
+        paginator = EmbedPaginatorSession(ctx, *pages)
+        await paginator.run()
 
 @bot.tree.command(name="editquiz")
 @app_commands.choices(quiz_type=get_quiz_type_choices(session=bot.session))
@@ -2826,6 +3492,7 @@ async def queue(interaction: discord.Interaction):
     new_clip="input new clip",
     new_answer="input new seiyuu",
     new_bonus_answer="the bonus character answer for the quiz.",
+    new_hints= "the hints for the quiz",
     clear_button_clicks="clears everyone's button clicks for the selected quiz type. only use if the clip link is broken for everyone.",
     clear_attempts="clears everyone's attempts for the selected quiz type. only use if you want to change the seiyuu clip and answer altogether.",
     delete_quiz="delete the quiz for targetted date.",
@@ -2837,6 +3504,7 @@ async def edit_quiz(
     new_clip: Optional[str] = None,
     new_answer: Optional[str] = None,
     new_bonus_answer: Optional[str] = None,
+    new_hints: Optional[str] = None,
     clear_button_clicks: Optional[bool] = False,
     clear_attempts: Optional[bool] = False,
     delete_quiz: Optional[bool] = False,
@@ -2957,17 +3625,13 @@ async def edit_quiz(
 
         else:
             # If none of the special options were selected, proceed with regular updates
-            if any([new_clip, new_answer, new_bonus_answer]):
+            if any([new_clip, new_answer, new_bonus_answer, new_hints]):
                 # Update attributes
                 quiz.clip = new_clip if new_clip is not None else quiz.clip
                 quiz.answer = new_answer if new_answer is not None else quiz.answer
-                quiz.bonus_answer = (
-                    new_bonus_answer
-                    if new_bonus_answer is not None
-                    else quiz.bonus_answer
-                )
-
-                # Commit the changes to the database
+                quiz.bonus_answer = new_bonus_answer if new_bonus_answer is not None else quiz.bonus_answer
+                quiz.hints = new_hints if new_hints is not None else quiz.hints
+                
                 session.commit()
 
                 await interaction.response.send_message(
@@ -3060,6 +3724,113 @@ async def edit_answer(
             f"Answer for user **{user.name}**, answer {answer}, and time {answer_time} updated."
         )
 
+DATABASE_PATH = "database/poyuta.db"
+
+@bot.tree.command(name="exportdb", description="Export the bot's SQLite database")
+async def exportdb(interaction: discord.Interaction):
+
+    with bot.session as session:
+        if not is_bot_admin(session=session, user=interaction.user):
+            await interaction.response.send_message(
+                "You are not an admin, you can't use this command."
+            )
+            return
+
+    import os
+    print("Looking for DB at:", os.path.abspath(DATABASE_PATH))
+
+    if not os.path.exists(DATABASE_PATH):
+        return await interaction.response.send_message(
+            f"❌ Database file not found at `{DATABASE_PATH}`.",
+            ephemeral=True
+        )
+
+    file = discord.File(DATABASE_PATH, filename="poyuta_export.db")
+
+    await interaction.response.send_message(
+        content="📦 Here's your database export:",
+        file=file,
+        ephemeral=True
+    )
+
+@bot.tree.command(name="importdb", description="Import a SQLite database and replace the current one.")
+async def importdb(interaction: discord.Interaction):
+
+    # Admin check
+    with bot.session as session:
+        if not is_bot_admin(session=session, user=interaction.user):
+            return await interaction.response.send_message(
+                "You are not an admin, you can't use this command.",
+                ephemeral=True
+            )
+
+    # Ask for upload
+    await interaction.response.send_message(
+        "📥 Please upload the **.db** file you want to import.\n"
+        "_(Upload it as the next message, this request expires in 60 seconds.)_",
+        ephemeral=True
+    )
+
+    # Wait for file upload
+    def check(msg: discord.Message):
+        return (
+            msg.author.id == interaction.user.id
+            and len(msg.attachments) == 1
+        )
+
+    try:
+        msg = await bot.wait_for("message", timeout=60, check=check)
+    except asyncio.TimeoutError:
+        return await interaction.followup.send(
+            "⏳ Import timed out. Please use `/importdb` again.",
+            ephemeral=True
+        )
+
+    attachment = msg.attachments[0]
+
+    # Validate extension
+    if not attachment.filename.lower().endswith((".db", ".sqlite", ".sqlite3")):
+        return await interaction.followup.send(
+            "❌ Invalid file type. Must be a `.db` or `.sqlite` file.",
+            ephemeral=True
+        )
+
+    # Save uploaded DB temporarily
+    temp_path = DATABASE_PATH + ".tmp_import"
+    await attachment.save(temp_path)
+
+    # Validate SQLite file
+    try:
+        conn = sqlite3.connect(temp_path)
+        conn.execute("SELECT name FROM sqlite_master LIMIT 1;")
+        conn.close()
+    except Exception as e:
+        os.remove(temp_path)
+        return await interaction.followup.send(
+            f"❌ Uploaded file is **not** a valid SQLite database:\n```\n{e}\n```",
+            ephemeral=True
+        )
+
+    # Backup current DB
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = f"{DATABASE_PATH}.backup_{timestamp}"
+
+    try:
+        shutil.copy2(DATABASE_PATH, backup_path)
+    except Exception as e:
+        return await interaction.followup.send(
+            f"⚠️ Failed to create backup:\n```\n{e}\n```",
+            ephemeral=True
+        )
+
+    # Replace DB
+    shutil.move(temp_path, DATABASE_PATH)
+
+    await interaction.followup.send(
+        "✅ **Database imported successfully!**\n"
+        f"A backup was saved as:\n`{backup_path}`\n\n",
+        ephemeral=True
+    )
 
 # Helper function to check if a user is an admin
 def is_bot_admin(session, user):

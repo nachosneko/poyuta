@@ -85,6 +85,8 @@ class Quiz(Base):
     answer = sa.Column(sa.String, nullable=False)
     bonus_answer = sa.Column(sa.String, nullable=True)
 
+    hints = sa.Column(sa.String, nullable=True)
+
     date = sa.Column(sa.Date, nullable=False)
     id_type = sa.Column(sa.Integer, sa.ForeignKey(QuizType.id))
     type = relationship(QuizType, backref="quizzes")
