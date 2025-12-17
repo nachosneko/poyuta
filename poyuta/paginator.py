@@ -65,7 +65,7 @@ class PaginatorSession:
         }
         self._buttons_map = {"<<": None, "<": None, ">": None, ">>": None}
 
-    async def show_page(self, index: int) -> typing.Optional[typing.Dict]:
+    async def show_page(self, index: int, ephemeral: bool = False) -> typing.Optional[typing.Dict]:
         """
         Show a page by page number.
 
@@ -84,7 +84,7 @@ class PaginatorSession:
         if self.running:
             result = self._show_page(page)
         else:
-            await self.create_base(page)
+            await self.create_base(page, ephemeral=ephemeral)
 
         self.update_disabled_status()
         return result
@@ -118,7 +118,7 @@ class PaginatorSession:
             if self._buttons_map[">"] is not None:
                 self._buttons_map[">"].disabled = False
 
-    async def create_base(self, item) -> None:
+    async def create_base(self, item, ephemeral: bool = False) -> None:
         """
         Create a base `Message`.
         """
@@ -130,7 +130,7 @@ class PaginatorSession:
             self.update_disabled_status()
             self.running = True
 
-        await self._create_base(item, self.view)
+        await self._create_base(item, self.view, ephemeral=ephemeral)
 
     async def _create_base(self, item, view: View) -> None:
         raise NotImplementedError
@@ -154,12 +154,12 @@ class PaginatorSession:
         """Returns the index of the last page"""
         return len(self.pages) - 1
 
-    async def run(self) -> typing.Optional[Message]:
+    async def run(self, *, ephemeral: bool = False) -> typing.Optional[Message]:
         """
         Starts the pagination session.
         """
         if not self.running:
-            await self.show_page(self.current)
+            await self.show_page(self.current, ephemeral=ephemeral)
 
             if self.view is not None:
                 await self.view.wait()
@@ -196,11 +196,15 @@ class PaginatorSession:
 
             if self.view is not None:
                 self.view.stop()
-                if delete:
-                    await message.delete()
-                else:
-                    self.view.clear_items()
-                    await message.edit(view=self.view)
+
+                try:
+                    if delete:
+                        await message.delete()
+                    else:
+                        self.view.clear_items()
+                        await message.edit(view=self.view)
+                except discord.NotFound:
+                    pass
 
 
 class PaginatorView(View):
@@ -226,6 +230,7 @@ class PaginatorView(View):
         super().__init__(*args, **kwargs)
         self.handler = handler
         self.clear_items()  # clear first so we can control the order
+        self.disable_stop = getattr(handler, "disable_stop", False)
         self.fill_items()
 
     @discord.ui.button(label="Stop", style=ButtonStyle.danger)
@@ -249,16 +254,25 @@ class PaginatorView(View):
 
             self.handler._buttons_map[label] = button
             self.add_item(button)
-        self.add_item(self.stop_button)
+        if not self.disable_stop:
+            self.add_item(self.stop_button)
+
 
     async def interaction_check(self, interaction: Interaction):
-        """Only allow the message author to interact"""
-        if interaction.user != self.handler.ctx.author:
+        """Only allow the original user to control the paginator"""
+        # Determine the original user — works for both commands and slash commands
+        if isinstance(self.handler.ctx, discord.Interaction):
+            original_user = self.handler.ctx.user
+        else:
+            original_user = self.handler.ctx.author
+
+        if interaction.user != original_user:
             await interaction.response.send_message(
                 "Only the original author can control this!", ephemeral=True
             )
             return False
         return True
+
 
 
 class PageButton(Button):
@@ -314,6 +328,7 @@ class PageSelect(Select):
 
 class EmbedPaginatorSession(PaginatorSession):
     def __init__(self, ctx: commands.Context, *embeds, **options):
+        self.disable_stop = options.get("disable_stop", False)
         super().__init__(ctx, *embeds, **options)
 
         if len(self.pages) > 1:
@@ -364,8 +379,12 @@ class EmbedPaginatorSession(PaginatorSession):
         else:
             raise TypeError("Page must be an Embed object.")
 
-    async def _create_base(self, item: Embed, view: View) -> None:
-        self.base = await self.destination.send(embed=item, view=view)
+    async def _create_base(self, item: Embed, view: View, ephemeral: bool = False) -> None:
+        if isinstance(self.destination, discord.Interaction):
+            await self.destination.response.send_message(embed=item, view=view, ephemeral=ephemeral)
+            self.base = await self.destination.original_response()
+        else:
+            self.base = await self.destination.send(embed=item, view=view)
 
     def _show_page(self, page):
         return dict(embed=page)
