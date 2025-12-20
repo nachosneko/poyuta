@@ -1446,8 +1446,6 @@ async def generate_stats_embed_content(
         Filled embed.
     """
 
-    # cache for global ranks per quiz id to avoid repeated DB queries
-    quiz_global_rank_cache: dict[int, dict[int, int]] = {}  # quiz_id -> {user_id: rank}
     current_quiz_date = get_current_quiz_date(daily_quiz_reset_time)
 
     with session as session:
@@ -1602,38 +1600,9 @@ async def generate_stats_embed_content(
             else:
                 display_text = f"{main_character}" if not main_seiyuu else f"{main_character} / {main_seiyuu}"
 
-
-            # GLOBAL RANK calculation (cached per quiz_id)
-            quiz_id = answer.quiz_id
-            if quiz_id not in quiz_global_rank_cache:
-                corrects_for_quiz = (
-                    session.query(Answer)
-                    .filter(Answer.quiz_id == quiz_id, Answer.is_correct == True)
-                    .order_by(Answer.answer_time.asc())
-                    .all()
-                )
-                rank_map: dict[int, int] = {}
-                for idx, a in enumerate(corrects_for_quiz):
-                    # first occurrence of user_id -> global rank
-                    if a.user_id not in rank_map:
-                        rank_map[a.user_id] = idx + 1
-                quiz_global_rank_cache[quiz_id] = rank_map
-
-            user_global_rank = quiz_global_rank_cache[quiz_id].get(answer.user_id)
-            if user_global_rank == 1:
-                global_display = "**Top 🥇**"
-            elif user_global_rank == 2:
-                global_display = "**Top 🥈**"
-            elif user_global_rank == 3:
-                global_display = "**Top 🥉**"
-            elif user_global_rank is not None:
-                global_display = f"**Top #{user_global_rank}**"
-            else:
-                global_display = "**Top —**"
-
             line = (
                 f"{rank} **{answer.answer_time:.3f}s** - {display_text}\n"
-                f"> {global_display} in {nb_attempts[i]} attempt(s) / {answer.quiz.date}"
+                f"> in {nb_attempts[i]} attempt(s) / {answer.quiz.date}"
             )
             fastest_answers_lines.append(line)
 
@@ -1942,10 +1911,6 @@ async def generate_guesses_embed_content(
 
     current_quiz_date = get_current_quiz_date(daily_quiz_reset_time)
 
-    # cache to avoid repeated DB queries per quiz
-    quiz_global_rank_cache: dict[int, dict[int, int]] = {}  # quiz_id -> {user_id: rank}
-
-
     with session as session:
         # Get the answers for this type
 
@@ -2051,41 +2016,11 @@ async def generate_guesses_embed_content(
                 else:
                     display_text = f"{main_character}" if not main_seiyuu else f"{main_character} / {main_seiyuu}"
 
-                # ---------- GLOBAL RANK (cache per quiz) ----------
-                quiz_id = answer.quiz_id
-                if quiz_id not in quiz_global_rank_cache:
-                    # load all correct answers for that quiz ordered by time
-                    corrects = (
-                        session.query(Answer)
-                        .filter(Answer.quiz_id == quiz_id, Answer.is_correct == True)
-                        .order_by(Answer.answer_time.asc())
-                        .all()
-                    )
-                    rank_map = {}
-                    for idx, a in enumerate(corrects):
-                        # if multiple answers by same user, keep earliest occurrence (first appearance)
-                        if a.user_id not in rank_map:
-                            rank_map[a.user_id] = idx + 1
-                    quiz_global_rank_cache[quiz_id] = rank_map
-
-                user_global_rank = quiz_global_rank_cache[quiz_id].get(answer.user_id)
-
-                # pretty global display (podium emojis for 1-3)
-                if user_global_rank == 1:
-                    global_display = "**Top 🥇**"
-                elif user_global_rank == 2:
-                    global_display = "**Top 🥈**"
-                elif user_global_rank == 3:
-                    global_display = "**Top 🥉**"
-                elif user_global_rank is not None:
-                    global_display = f"**Top #{user_global_rank}**"
-                else:
-                    global_display = "**Top —**"
 
                 # Build final value: personal rank (left), time, guessed display, then attempts/date + global rank after date
                 value = (
                     f"{personal_rank} **{answer.answer_time:.3f}s** - {display_text}\n"
-                    f"> {global_display} in {nb_attempts[i]} attempt(s) / {answer.quiz.date}"
+                    f"> in {nb_attempts[i]} attempt(s) / {answer.quiz.date}"
                 )
 
                 embed.add_field(name="", value=value, inline=False)
